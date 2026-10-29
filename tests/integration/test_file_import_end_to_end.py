@@ -90,6 +90,8 @@ def totals(result: NormalizationResult, currency: str) -> tuple[Decimal, Decimal
         ("deposit_eu.csv", "deposit_eu.expected.json", "EUR"),
         ("text_amounts_eu.xlsx", "deposit_eu.expected.json", "EUR"),
         ("bank_preamble_footer.csv", "bank_preamble_footer.expected.json", "USD"),
+        ("statement_ruled.pdf", "deposit_basic.expected.json", "USD"),  # two PDF pages
+        ("statement_debit_credit.pdf", "bank_preamble_footer.expected.json", "USD"),
     ],
 )
 def test_file_totals_match_independent_oracle(
@@ -205,3 +207,61 @@ def test_original_files_are_untouched_by_the_pipeline(conn: sqlite3.Connection) 
     for name, ccy in (("deposit_basic.csv", "USD"), ("bank_basic.xlsx", "USD")):
         run_pipeline(conn, name, ccy)
     assert snapshot == {p: p.read_bytes() for p in snapshot}
+
+
+def test_pdf_and_csv_of_the_same_statement_agree_row_by_row(conn: sqlite3.Connection) -> None:
+    csv_result, _ = run_pipeline(conn, "deposit_basic.csv", "USD")
+    pdf_result, _ = run_pipeline(conn, "statement_ruled.pdf", "USD")
+    key = lambda t: (t.txn_date, t.amount_minor, t.normalized_description, t.reported_balance_minor)  # noqa: E731
+    assert [key(t) for t in csv_result.transactions] == [key(t) for t in pdf_result.transactions]
+
+
+def test_pdf_rows_point_back_to_page_and_row(conn: sqlite3.Connection) -> None:
+    result, _ = run_pipeline(conn, "statement_ruled.pdf", "USD")
+    refs = [(t.source_ref.location, t.source_ref.row_index) for t in result.transactions]
+    assert refs[0] == ("page 1", 2) and refs[5] == ("page 2", 2)
+
+
+def test_pdf_totals_row_is_skipped_not_imported(conn: sqlite3.Connection) -> None:
+    result, _ = run_pipeline(conn, "statement_debit_credit.pdf", "USD")
+    assert len(result.transactions) == 3 and result.issue_counts() == {"I_FOOTER_SKIPPED": 1}
+
+
+def test_scanned_pdf_asks_for_ocr_and_ocr_reports_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bank_analyzer.domain.errors import ImportStructureError, NeedsOcrError
+    from bank_analyzer.importer import ocr_importer
+
+    with staged_upload(FIXTURES / "image_only.pdf") as staged:
+        with pytest.raises(NeedsOcrError):
+            extract_table(staged)
+        monkeypatch.setattr(ocr_importer, "find_tesseract", lambda command=None: None)
+        with pytest.raises(ImportStructureError, match="Tesseract is not installed"):
+            extract_table(staged, use_ocr=True)
+
+
+def test_full_pdf_workflow_through_the_import_service(conn: sqlite3.Connection) -> None:
+    """staged PDF -> extract -> preview -> confirm -> stored totals equal the oracle."""
+    from bank_analyzer.services.import_service import commit_preview, prepare_preview
+
+    want = expected("deposit_basic.expected.json")
+    account = AccountRepository(conn).create("PDF acct", AccountType.DEPOSIT, "USD")
+    with staged_upload(FIXTURES / "statement_ruled.pdf") as staged:
+        raw = extract_table(staged)
+    mapping = suggest_mapping(raw.headers).mapping
+    assert mapping is not None
+    choices = ImportChoices(
+        account_id=account.id,
+        default_currency="USD",
+        date_format="%Y-%m-%d",
+        decimal_sep=".",
+        thousands_sep=",",
+        sign_convention=SignConvention.NEGATIVE_IS_OUTFLOW,
+    )
+    preview = prepare_preview(conn, raw, mapping, choices, display_name="statement_ruled.pdf")
+    assert not preview.duplicates and not preview.needs_rejected_ack
+    commit_preview(conn, preview, confirmed=True)
+    stored = TransactionRepository(conn).monthly_totals()
+    assert sum(m.credits.minor for m in stored) == int(Decimal(want["total_credits"]) * 100)
+    assert sum(m.debits.minor for m in stored) == int(Decimal(want["total_debits"]) * 100)

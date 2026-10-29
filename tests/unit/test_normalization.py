@@ -310,3 +310,49 @@ class TestDetectFormats:
         raw = raw_from_rows([["01/02/2024", "A", "1.00", ""]])
         d = detect_formats(raw, SIGNED, currency="USD")
         assert d.date.ambiguous and d.needs_user_choice
+
+
+class TestOcrConfidence:
+    @staticmethod
+    def table(*confidences: float | None):  # noqa: ANN205
+        from bank_analyzer.domain.imports import RawRow, RawTable
+        from bank_analyzer.domain.models import FileKind
+
+        rows = tuple(
+            RawRow(i, (f"2024-01-0{i}", f"SHOP {i}", "-1.00", ""), "page 1", confidence=c)
+            for i, c in enumerate(confidences, start=1)
+        )
+        headers = ("Date", "Description", "Amount", "Balance")
+        return RawTable("0" * 64, FileKind.PDF_OCR, headers, rows)
+
+    def test_low_confidence_rows_are_flagged_with_a_warning(self) -> None:
+        r = normalize(
+            self.table(95.0, 41.0, 79.9, 80.0), SIGNED, choices(), import_batch_id="b", today=TODAY
+        )
+        assert r.low_confidence_rows == (2, 3)
+        assert r.issue_counts() == {"W_LOW_OCR_CONFIDENCE": 2}
+        assert len(r.transactions) == 4  # flagged, not dropped: the user decides
+
+    def test_threshold_is_configurable(self) -> None:
+        r = normalize(
+            self.table(95.0, 85.0),
+            SIGNED,
+            choices(),
+            import_batch_id="b",
+            today=TODAY,
+            min_ocr_confidence=90.0,
+        )
+        assert r.low_confidence_rows == (2,)
+
+    def test_rows_without_confidence_are_never_flagged(self) -> None:
+        r = normalize(self.table(None, None), SIGNED, choices(), import_batch_id="b", today=TODAY)
+        assert r.low_confidence_rows == () and not r.issues
+
+    def test_flagged_row_that_is_also_rejected_is_not_listed(self) -> None:
+        from bank_analyzer.domain.imports import RawRow, RawTable
+        from bank_analyzer.domain.models import FileKind
+
+        bad = RawRow(1, ("not-a-date", "X", "-1.00", ""), "page 1", confidence=10.0)
+        raw = RawTable("0" * 64, FileKind.PDF_OCR, (), (bad,))
+        r = normalize(raw, SIGNED, choices(), import_batch_id="b", today=TODAY)
+        assert r.low_confidence_rows == () and r.rows_rejected == 1

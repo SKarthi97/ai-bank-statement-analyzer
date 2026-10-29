@@ -53,6 +53,7 @@ from bank_analyzer.domain.validation import (
     W_BAD_BALANCE,
     W_BAD_BOOKING_DATE,
     W_DESCRIPTION_TRUNCATED,
+    W_LOW_OCR_CONFIDENCE,
     W_SIGN_IN_DEBIT_CREDIT,
     W_TWO_DIGIT_YEAR,
     Severity,
@@ -204,6 +205,7 @@ def normalize(
     *,
     import_batch_id: str,
     today: date | None = None,
+    min_ocr_confidence: float = 80.0,
 ) -> NormalizationResult:
     """Normalize extracted rows into canonical transactions.
 
@@ -216,6 +218,7 @@ def normalize(
     issues: list[ValidationIssue] = []
     drafts: list[_Draft] = []
     skipped = rejected = 0
+    low_confidence: list[int] = []
 
     def issue(sev: Severity, code: str, msg: str, row: RawRow) -> None:
         issues.append(ValidationIssue(sev, code, msg, row.row_index))
@@ -293,6 +296,14 @@ def normalize(
             issue(Severity.WARNING, W_TWO_DIGIT_YEAR, "Two-digit year; verify the century.", row)
 
         drafts.append(_Draft(row, txn_date, booking, description, parsed, balance))
+        if row.confidence is not None and row.confidence < min_ocr_confidence:
+            low_confidence.append(row.row_index)
+            issue(
+                Severity.WARNING,
+                W_LOW_OCR_CONFIDENCE,
+                "Low OCR confidence: confirm the amount against the original.",
+                row,
+            )
 
     transactions: list[CanonicalTransaction] = []
     seen: dict[tuple[date, int, str, str], int] = {}
@@ -335,6 +346,7 @@ def normalize(
         rows_read=len(raw.rows),
         rows_skipped=skipped,
         rows_rejected=rejected,
+        low_confidence_rows=tuple(low_confidence),
     )
 
 

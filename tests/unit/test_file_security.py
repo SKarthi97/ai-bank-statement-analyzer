@@ -30,7 +30,12 @@ VALID_PARTS = {"[Content_Types].xml": b"<x/>", "xl/workbook.xml": b"<x/>"}
 class TestExtensions:
     @pytest.mark.parametrize(
         ("name", "kind"),
-        [("a.csv", FileKind.CSV), ("A.CSV", FileKind.CSV), ("s.xlsx", FileKind.XLSX)],
+        [
+            ("a.csv", FileKind.CSV),
+            ("A.CSV", FileKind.CSV),
+            ("s.xlsx", FileKind.XLSX),
+            ("Statement.PDF", FileKind.PDF),
+        ],
     )
     def test_allowed(self, name: str, kind: FileKind) -> None:
         assert kind_for_extension(name) == kind
@@ -41,7 +46,9 @@ class TestExtensions:
             "a.exe",
             "a.xls",
             "a.xlsm",
-            "a.pdf",
+            "a.pdfx",
+            "a.pdf.exe",
+            "a.pdf ",
             "a.csv.exe",
             "a.csv ",
             "noext",
@@ -224,3 +231,29 @@ class TestXlsxContainer:
         with pytest.raises(FileValidationError) as info, staged_upload(source):
             pass
         assert "12345678" not in str(info.value) and "DE89" not in str(info.value)
+
+
+class TestPdfStaging:
+    def test_real_pdf_is_staged_with_a_generated_name(self) -> None:
+        with staged_upload(FIXTURES / "statement_ruled.pdf") as staged:
+            assert staged.kind == FileKind.PDF and staged.path.name == "upload.pdf"
+
+    def test_text_file_named_pdf_is_rejected(self, tmp_path: Path) -> None:
+        source = tmp_path / "fake.pdf"
+        source.write_bytes(b"just some text, no pdf signature at all")
+        with pytest.raises(FileValidationError, match="not a valid PDF"), staged_upload(source):
+            pass
+
+    def test_pdf_size_limit_is_separate_from_the_tabular_limit(self, tmp_path: Path) -> None:
+        source = tmp_path / "big.pdf"
+        source.write_bytes(b"%PDF-1.4\n" + b"0" * 1_200_000)
+        with pytest.raises(FileValidationError, match="1 MB"), staged_upload(source, max_mb_pdf=1):
+            pass
+        with staged_upload(source, max_mb_tabular=1, max_mb_pdf=5) as staged:
+            assert staged.kind == FileKind.PDF
+
+    def test_pdf_disguised_as_csv_is_still_rejected(self, tmp_path: Path) -> None:
+        source = tmp_path / "invoice.csv"
+        source.write_bytes(b"%PDF-1.4\n1 0 obj")
+        with pytest.raises(FileValidationError), staged_upload(source):
+            pass

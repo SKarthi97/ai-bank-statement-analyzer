@@ -332,6 +332,24 @@ class TransactionRepository:
             raise NotFoundError("transaction not found")
         return self._row(row)
 
+    def find_matching(
+        self,
+        *,
+        account_id: str,
+        txn_date: date,
+        amount_minor: int,
+        currency: str,
+        normalized_description: str,
+    ) -> list[str]:
+        """Ids of live (not rolled back) transactions identical on the duplicate-check key."""
+        rows = self._conn.execute(
+            "SELECT id FROM transactions WHERE is_voided = 0 AND account_id = ? AND txn_date = ? "
+            "AND amount_minor = ? AND currency = ? AND normalized_description = ? "
+            "ORDER BY occurrence_index, created_at, id",
+            (account_id, txn_date.isoformat(), amount_minor, currency, normalized_description),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
     @staticmethod
     def _where(flt: TransactionFilter) -> tuple[str, list[object]]:
         clauses: list[str] = []

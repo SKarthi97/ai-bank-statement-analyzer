@@ -149,12 +149,12 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 | Canonical model + validation | ✔ (Phase 2) |
 | SQLite schema + migrations | ✔ (Phase 2) |
 | Repositories + rollback | ✔ (Phase 2) |
-| CSV import | ☐ |
-| XLSX import | ☐ |
-| PDF text import | ☐ |
-| OCR import | ☐ |
-| Column mapping + profiles | ☐ |
-| Duplicate detection | ☐ |
+| CSV import | ✔ (Phase 3) |
+| XLSX import | ✔ (Phase 3). Tested only on openpyxl-made files |
+| PDF text import | ◐ (Phase 3). Ruled tables are read and tested; text-aligned layouts that fragment cells are refused by design; no Phase-7 subprocess isolation yet |
+| OCR import | ◐ (Phase 3). TSV parsing, table building and confidence gating are tested; the real Tesseract call is NOT verified (Tesseract not installed during development; one optional `ocr` test is skipped) |
+| Column mapping + profiles | ◐ (Phase 3). Header-based suggestions and balance-based sign hints done; saved bank profiles not implemented |
+| Duplicate detection | ◐ (Phase 3). Import-time candidates against stored data are done; recurring/within-history duplicate analysis is Phase 5 |
 | Transfer matching | ☐ |
 | Balance reconciliation | ☐ |
 | Rule-based categorization | ☐ |
@@ -181,3 +181,4 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 5. Whether the account alias may include last-4 digits [optional, off].
 6. Repository path is inside OneDrive: confirm that source code may stay there but the data directory must not [yes].
 7. Whether to run parsers in an isolated subprocess [yes in Phase 7].
+| Import preview + confirmation gates | ✔ (Phase 3, service layer; the Import Center page is Phase 6) |

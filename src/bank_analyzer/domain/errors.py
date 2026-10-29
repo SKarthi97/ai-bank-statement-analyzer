@@ -39,6 +39,10 @@ class ImportStructureError(BankAnalyzerError, ValueError):
     """A valid file could not be read as a statement table (no header, no delimiter...)."""
 
 
+class NeedsOcrError(ImportStructureError):
+    """A PDF has no text layer (a scan). The UI may offer the optional OCR path."""
+
+
 class MappingError(BankAnalyzerError, ValueError):
     """The column mapping or import choices are inconsistent."""
 

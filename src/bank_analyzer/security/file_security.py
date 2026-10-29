@@ -37,7 +37,9 @@ MAX_ZIP_ENTRIES = 1000
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * _MB
 MAX_ZIP_RATIO = 100  # per-entry uncompressed/compressed ratio
 
-_EXTENSIONS = {".csv": FileKind.CSV, ".xlsx": FileKind.XLSX}
+_EXTENSIONS = {".csv": FileKind.CSV, ".xlsx": FileKind.XLSX, ".pdf": FileKind.PDF}
+_STAGED_SUFFIX = {FileKind.CSV: ".csv", FileKind.XLSX: ".xlsx", FileKind.PDF: ".pdf"}
+_PDF_ACTIVE_CONTENT = re.compile(rb"/(JavaScript|JS|Launch|EmbeddedFile)(?![A-Za-z0-9])")
 
 
 def ensure_private_dir(path: Path) -> Path:
@@ -71,7 +73,7 @@ def kind_for_extension(name: str) -> FileKind:
     suffix = PurePath(name.replace("\\", "/")).suffix.lower()
     kind = _EXTENSIONS.get(suffix)
     if kind is None:
-        raise FileValidationError("Unsupported file type. Use .csv or .xlsx.")
+        raise FileValidationError("Unsupported file type. Use .csv, .xlsx or .pdf.")
     return kind
 
 
@@ -116,6 +118,24 @@ def _check_csv_content(path: Path) -> None:
         raise FileValidationError("The file does not look like a text CSV file.")
 
 
+def _check_pdf_content(path: Path) -> tuple[str, ...]:
+    """Require a PDF signature and report (never execute) embedded active content.
+
+    The scan is best-effort: names inside compressed object streams are not visible to it.
+    Nothing in this application executes PDF scripts, launches actions or opens attachments.
+    """
+    data = path.read_bytes()
+    if b"%PDF-" not in data[:1024]:
+        raise FileValidationError("The file is not a valid PDF document.")
+    found = sorted({m.group(1).decode() for m in _PDF_ACTIVE_CONTENT.finditer(data)})
+    if found:
+        return (
+            "The PDF contains embedded active content "
+            f"({', '.join(found)}). It was ignored and nothing was run.",
+        )
+    return ()
+
+
 @dataclass(frozen=True, slots=True)
 class StagedFile:
     """A validated private copy of an upload. ``path`` is safe to read; never write to it."""
@@ -125,6 +145,7 @@ class StagedFile:
     sha256: str
     size_bytes: int
     display_name: str
+    warnings: tuple[str, ...] = ()
 
 
 @contextmanager
@@ -133,6 +154,7 @@ def staged_upload(
     *,
     original_name: str | None = None,
     max_mb_tabular: int = 25,
+    max_mb_pdf: int = 50,
 ) -> Iterator[StagedFile]:
     """Validate ``source``, copy it into a private temp dir, hash it, and clean up on exit.
 
@@ -149,23 +171,27 @@ def staged_upload(
         raise FileValidationError("The selected path is not a file.")
     if size == 0:
         raise FileValidationError("The file is empty.")
-    if size > max_mb_tabular * _MB:
-        raise FileValidationError(f"The file is larger than the {max_mb_tabular} MB limit.")
+    limit_mb = max_mb_pdf if kind == FileKind.PDF else max_mb_tabular
+    if size > limit_mb * _MB:
+        raise FileValidationError(f"The file is larger than the {limit_mb} MB limit.")
 
     workdir = Path(tempfile.mkdtemp(prefix="bankan-"))
     try:
         if os.name == "posix":
             workdir.chmod(stat.S_IRWXU)
         # The staged name is generated, never derived from the user's file name.
-        staged = workdir / f"upload{'.xlsx' if kind == FileKind.XLSX else '.csv'}"
+        staged = workdir / f"upload{_STAGED_SUFFIX[kind]}"
         digest = hashlib.sha256()
         with source.open("rb") as src, staged.open("wb") as dst:
             while chunk := src.read(_CHUNK):
                 digest.update(chunk)
                 dst.write(chunk)
         restrict_file(staged)
+        warnings: tuple[str, ...] = ()
         if kind == FileKind.XLSX:
             _check_xlsx_container(staged)
+        elif kind == FileKind.PDF:
+            warnings = _check_pdf_content(staged)
         else:
             _check_csv_content(staged)
         yield StagedFile(
@@ -174,6 +200,7 @@ def staged_upload(
             sha256=digest.hexdigest(),
             size_bytes=size,
             display_name=safe_display_name(name),
+            warnings=warnings,
         )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

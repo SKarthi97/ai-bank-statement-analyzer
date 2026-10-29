@@ -46,5 +46,5 @@ packages = ["bank_analyzer"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["openpyxl", "openpyxl.*"]
+module = ["openpyxl", "openpyxl.*", "pdfplumber", "pdfplumber.*", "pdfminer", "pdfminer.*"]
 ignore_missing_imports = true

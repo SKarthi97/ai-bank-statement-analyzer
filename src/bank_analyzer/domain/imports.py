@@ -34,6 +34,7 @@ class RawRow:
     row_index: int
     cells: tuple[str, ...]
     location: str | None = None  # sheet name or "page N"
+    confidence: float | None = None  # OCR only: lowest word confidence in the row, 0-100
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,9 @@ class NormalizationResult:
     rows_read: int
     rows_skipped: int  # blank rows, footers and merged continuation lines
     rows_rejected: int  # rows with errors; never imported
+    # Source row numbers whose OCR confidence was below the threshold: the user must confirm
+    # the amounts of these rows before the import may be committed.
+    low_confidence_rows: tuple[int, ...] = ()
 
     @property
     def has_errors(self) -> bool:
