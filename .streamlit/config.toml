@@ -1,4 +1,4 @@
-# Localhost-only, no telemetry. Streamlit is installed in a later phase.
+# Localhost-only, no telemetry.
 [server]
 address = "127.0.0.1"
 port = 8501

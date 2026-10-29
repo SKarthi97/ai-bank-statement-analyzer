@@ -159,12 +159,12 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 | Balance reconciliation | ✔ (Phase 5): deposit and card/loan sign rules, newest-first detection, missing balances tolerated, per-import; tested on synthetic statements only |
 | Rule-based categorization | ✔ (Phase 4): user rules, approved merchant mappings, built-in rules |
 | LLM categorization | ◐ (Phase 4). Client, prompts, validation and gating are tested against a fake Ollama server and scripted models. NOT yet verified against a real Ollama (none installed during development) |
-| Review queue + bulk actions | ✔ (Phase 4, service layer; the review UI is Phase 6) |
+| Review queue + bulk actions | ✔ (Phase 4 service layer; Phase 6 page written, unverified under real Streamlit) |
 | Analytics catalogue | ✔ (Phase 5): all metrics in docs/05 section 3 except "unusual amounts" (alert A1) and recurring (own module); the assistant and UI are Phase 6 |
 | Recurring detection | ✔ (Phase 5) |
 | Anomaly detection | ✔ (Phase 5): rules A1-A6. Thresholds are defaults chosen by reasoning and synthetic data, not tuned on real statements |
-| Dashboard pages | ☐ |
-| AI assistant (planner/executor/validator) | ☐ |
+| Dashboard pages | ◐ (Phase 6): Overview, Import Center, Transactions (+ review queue), Analytics, AI Assistant and Settings are written and their own code runs end to end against a stand-in Streamlit (`tests/ui/test_pages_stub.py`). They have NOT been run under real Streamlit: it could not be installed in the environment where they were written. Once Streamlit is installed, run `tests/ui/test_pages_apptest.py` and open the app once. Not built: transfer-link management, category merge/rename UI, CSV export |
+| AI assistant (planner/executor/validator) | ✔ (Phase 6): closed catalogue of 11 plans, rule planner then optional model planner, read-only executor, template answers with optional model rephrasing whose numbers are checked. The model path is tested only against fake models, never a real Ollama |
 | Export with formula protection | ☐ |
 | Backup/restore (encrypted) | ☐ |
 | Logging/redaction | ☐ |
@@ -181,4 +181,4 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 5. Whether the account alias may include last-4 digits [optional, off].
 6. Repository path is inside OneDrive: confirm that source code may stay there but the data directory must not [yes].
 7. Whether to run parsers in an isolated subprocess [yes in Phase 7].
-| Import preview + confirmation gates | ✔ (Phase 3, service layer; the Import Center page is Phase 6) |
+| Import preview + confirmation gates | ✔ (Phase 3 service layer; the Phase 6 Import Center page drives it, run end to end only against a stand-in Streamlit) |

@@ -156,6 +156,37 @@ transaction (a fixed-amount weekly payment that jumps is both A1 and A4); both a
 database (needed to explain the comparison). Same-day rows are ordered by their position in the file, which can be
 ambiguous for balance checks. Recurring detection uses merchant keys, so a merchant whose descriptions vary a lot is missed.
 
+### 5.7 Implementation notes (Phase 6, as built)
+
+**Assistant pipeline.** `question -> plan (rules, else local model) -> parse_plan -> execute on a read-only connection ->
+AnalysisResult -> template answer (optionally rephrased by the model and checked)`. Modules: `ai/query_plan.py` (the closed
+catalogue), `ai/query_planner.py`, `ai/query_executor.py`, `ai/answer.py`, `ai/assistant.py`.
+
+**Plans are data.** Eleven plans (section 7.2). Every plan is a pydantic model with `extra="forbid"` and range-checked fields.
+A model can only choose a catalogue name and parameters; `parse_plan` re-validates, and anything else is dropped. Periods are
+structured and resolved by Python against today's date. Merchant text is matched as plain text (`%` is not a wildcard).
+
+**Read-only.** `Assistant` refuses to start on a connection whose `PRAGMA query_only` is not 1. The UI gives it
+`connect_readonly`, which opens the file with `mode=ro`.
+
+**Honest answers.** An unfinished period (one ending after today) adds a warning, because comparing a half month with a full
+one looks like a large drop. More than one currency in scope asks the user to choose; totals are never mixed. A period with no
+data says so rather than printing zeros. "Why did expenses change" lists category and merchant differences and states they are
+associations, not causes.
+
+**Narration check.** The model may rephrase the template. The text is accepted only if it is short, contains no link, image or
+markup, and every number in it also appears in the result's *trusted* text (figures, amounts, dates, notes). Text derived from
+statements (descriptions, merchant and category names) is excluded, so a figure forged inside a description cannot be quoted.
+Otherwise the template is shown. The check cannot catch a correct number attached to a wrong claim, so the evidence table is
+always shown beside the answer, and the answer states whether it came from the template or the model.
+
+**Rendering.** Pages show statement-derived text with `st.text` / `st.dataframe` after `safe_cell` (control characters removed,
+length bounded). `escape_markdown` exists for any place markdown must be used.
+
+**Known limits.** The rule planner covers common phrasings only; other questions get a list of what can be asked. The model
+planner is optional and was tested only against fake models. Follow-up questions ("and the month before?") are not understood:
+each question stands alone.
+
 ## 6. Anomaly and Duplicate Rules
 
 | Rule ID | Condition | Default thresholds | Baseline shown |

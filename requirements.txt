@@ -11,3 +11,7 @@ pdfplumber==0.11.10
 pdfminer.six==20260107
 pypdfium2==5.14.0
 pillow==13.0.0
+
+# Phase 6 (web UI): streamlit is NOT pinned yet. It could not be installed in the environment where
+# Phase 6 was written (no network access), so no version has been tested. After you install it
+# yourself, run `python -m pytest tests/ui`, then pin the streamlit and pandas versions that pass.
