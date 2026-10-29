@@ -16,20 +16,26 @@ from bank_analyzer.domain.errors import InvalidStateError, NotFoundError
 from bank_analyzer.domain.models import (
     Account,
     AccountType,
+    AlertStatus,
     AmountSign,
+    AnomalyAlert,
     BatchStatus,
     CanonicalTransaction,
     CategorizationRule,
     Category,
     CategoryKind,
+    CategoryRole,
     CategorySource,
     ImportBatch,
     ImportSummary,
     MatchType,
     MerchantMapping,
+    RecurringRecord,
+    RecurringStatus,
     ReviewStatus,
     RollbackSummary,
     SourceRef,
+    default_role_for_kind,
     new_id,
     utc_now_iso,
 )
@@ -150,6 +156,7 @@ class CategoryRepository:
             id=row["id"],
             name=row["name"],
             kind=CategoryKind(row["kind"]),
+            role=CategoryRole(row["role"]),
             is_active=bool(row["is_active"]),
             is_default=bool(row["is_default"]),
             merged_into_id=row["merged_into_id"],
@@ -172,17 +179,36 @@ class CategoryRepository:
             raise NotFoundError("category not found")
         return self._row(row)
 
-    def create(self, name: str, kind: CategoryKind) -> Category:
-        category = Category(id=new_id(), name=name.strip(), kind=kind, created_at=utc_now_iso())
+    def create(self, name: str, kind: CategoryKind, role: CategoryRole | None = None) -> Category:
+        """Create a category. Without an explicit ``role`` one is derived from ``kind``."""
+        category = Category(
+            id=new_id(),
+            name=name.strip(),
+            kind=kind,
+            role=role or default_role_for_kind(kind),
+            created_at=utc_now_iso(),
+        )
         try:
             self._conn.execute(
-                "INSERT INTO categories (id, name, kind, is_active, is_default, created_at) "
-                "VALUES (?, ?, ?, 1, 0, ?)",
-                (category.id, category.name, category.kind.value, category.created_at),
+                "INSERT INTO categories (id, name, kind, role, is_active, is_default, created_at) "
+                "VALUES (?, ?, ?, ?, 1, 0, ?)",
+                (
+                    category.id,
+                    category.name,
+                    category.kind.value,
+                    category.role.value,
+                    category.created_at,
+                ),
             )
         except sqlite3.IntegrityError as exc:
             raise InvalidStateError("a category with this name already exists") from exc
         return category
+
+    def set_role(self, category_id: str, role: CategoryRole) -> None:
+        """Change how analytics treats a category (affects reports immediately)."""
+        self.get(category_id)
+        self._conn.execute("UPDATE categories SET role = ? WHERE id = ?", (role.value, category_id))
+        self._audit.record("category_role_changed", category_id)
 
     def rename(self, category_id: str, new_name: str) -> Category:
         self.get(category_id)
@@ -462,6 +488,40 @@ class TransactionRepository:
         )
         return cursor.rowcount == 1
 
+    def fetch_all(self, flt: TransactionFilter | None = None) -> list[CanonicalTransaction]:
+        """Every matching row (no paging) in date order, for analytics over a period."""
+        where, params = self._where(flt or TransactionFilter())
+        rows = self._conn.execute(
+            f"SELECT t.* FROM transactions t{where} ORDER BY t.txn_date, t.import_batch_id, t.id",
+            params,
+        ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def link_transfer(self, outflow_id: str, inflow_id: str, group_id: str) -> None:
+        """Mark two live, unlinked transactions as the two legs of one transfer (atomic)."""
+        with transaction(self._conn):
+            changed = self._conn.execute(
+                "UPDATE transactions SET transfer_group_id = ?, updated_at = ? "
+                "WHERE id IN (?, ?) AND transfer_group_id IS NULL AND is_voided = 0",
+                (group_id, utc_now_iso(), outflow_id, inflow_id),
+            ).rowcount
+            if changed != 2:
+                raise InvalidStateError("both transactions must exist, be live and not yet linked")
+            self._audit.record("transfer_linked", group_id, 2)
+
+    def unlink_transfer(self, group_id: str) -> int:
+        """Remove a transfer link. Returns the number of legs released."""
+        with transaction(self._conn):
+            released = self._conn.execute(
+                "UPDATE transactions SET transfer_group_id = NULL, updated_at = ? "
+                "WHERE transfer_group_id = ?",
+                (utc_now_iso(), group_id),
+            ).rowcount
+            if released == 0:
+                raise NotFoundError("transfer link not found")
+            self._audit.record("transfer_unlinked", group_id, released)
+        return released
+
     def list_pending_categorization(
         self, *, batch_id: str | None = None, limit: int | None = None
     ) -> list[CanonicalTransaction]:
@@ -672,6 +732,209 @@ class MerchantMappingRepository:
             )
             for r in rows
         ]
+
+
+class AlertRepository:
+    """Anomaly alerts and their history. Resolving an alert never deletes it."""
+
+    def __init__(self, conn: sqlite3.Connection, audit: AuditRepository | None = None) -> None:
+        self._conn = conn
+        self._audit = audit or AuditRepository(conn)
+
+    @staticmethod
+    def _row(row: sqlite3.Row) -> AnomalyAlert:
+        return AnomalyAlert(
+            id=row["id"],
+            rule_id=row["rule_id"],
+            transaction_id=row["transaction_id"],
+            related_transaction_ids=tuple(json.loads(row["related_transaction_ids_json"] or "[]")),
+            details=json.loads(row["details_json"]),
+            status=AlertStatus(row["status"]),
+            dedupe_key=row["dedupe_key"],
+            created_at=row["created_at"],
+            resolved_at=row["resolved_at"],
+        )
+
+    def create(
+        self,
+        *,
+        rule_id: str,
+        details: dict[str, object],
+        dedupe_key: str,
+        transaction_id: str | None = None,
+        related_ids: tuple[str, ...] = (),
+    ) -> AnomalyAlert | None:
+        """Save a new open alert, or return None if this rule already flagged this subject
+        (in any status, so a dismissed alert is not raised again)."""
+        alert_id = new_id()
+        try:
+            self._conn.execute(
+                "INSERT INTO anomaly_alerts (id, rule_id, transaction_id, "
+                "related_transaction_ids_json, details_json, status, created_at, dedupe_key) "
+                "VALUES (?, ?, ?, ?, ?, 'open', ?, ?)",
+                (
+                    alert_id,
+                    rule_id,
+                    transaction_id,
+                    json.dumps(list(related_ids)),
+                    json.dumps(details, sort_keys=True),
+                    utc_now_iso(),
+                    dedupe_key,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            if "dedupe" in str(exc) or "UNIQUE" in str(exc):
+                return None
+            raise
+        return self.get(alert_id)
+
+    def get(self, alert_id: str) -> AnomalyAlert:
+        row = self._conn.execute(
+            "SELECT * FROM anomaly_alerts WHERE id = ?", (alert_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError("alert not found")
+        return self._row(row)
+
+    def list_alerts(
+        self, *, status: AlertStatus | None = None, rule_id: str | None = None
+    ) -> list[AnomalyAlert]:
+        clauses, params = [], []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        if rule_id is not None:
+            clauses.append("rule_id = ?")
+            params.append(rule_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM anomaly_alerts{where} ORDER BY created_at, id", params
+        ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def resolve(self, alert_id: str, status: AlertStatus) -> AnomalyAlert:
+        """Dismiss or confirm an open alert. The user's decision is recorded, nothing is acted on."""
+        if status == AlertStatus.OPEN:
+            raise ValueError("resolve needs 'dismissed' or 'confirmed'")
+        alert = self.get(alert_id)
+        if alert.status != AlertStatus.OPEN:
+            raise InvalidStateError("this alert was already resolved")
+        self._conn.execute(
+            "UPDATE anomaly_alerts SET status = ?, resolved_at = ? WHERE id = ?",
+            (status.value, utc_now_iso(), alert_id),
+        )
+        self._audit.record(f"alert_{status.value}", alert_id)
+        return self.get(alert_id)
+
+
+class RecurringRepository:
+    """Recurring-payment candidates. The user's confirm/dismiss choice survives re-detection."""
+
+    def __init__(self, conn: sqlite3.Connection, audit: AuditRepository | None = None) -> None:
+        self._conn = conn
+        self._audit = audit or AuditRepository(conn)
+
+    @staticmethod
+    def _row(row: sqlite3.Row) -> RecurringRecord:
+        return RecurringRecord(
+            id=row["id"],
+            merchant_key=row["merchant_key"],
+            currency=row["currency"],
+            cadence_days=row["cadence_days"],
+            typical_amount_minor=row["typical_amount_minor"],
+            last_amount_minor=row["last_amount_minor"],
+            occurrences=row["occurrences"],
+            first_date=date.fromisoformat(row["first_date"]),
+            last_date=date.fromisoformat(row["last_date"]),
+            status=RecurringStatus(row["status"]),
+            updated_at=row["updated_at"],
+        )
+
+    def upsert(
+        self,
+        *,
+        merchant_key: str,
+        currency: str,
+        cadence_days: int,
+        typical_amount_minor: int,
+        last_amount_minor: int,
+        occurrences: int,
+        first_date: date,
+        last_date: date,
+    ) -> RecurringRecord:
+        """Insert or refresh a candidate, keeping a confirmed/dismissed status if one was set.
+
+        Money in and money out from one merchant are separate candidates (the sign differs).
+        """
+        sign = 1 if typical_amount_minor >= 0 else -1
+        existing = self._conn.execute(
+            "SELECT * FROM recurring_candidates WHERE merchant_key = ? AND currency = ? "
+            "AND (typical_amount_minor >= 0) = ?",
+            (merchant_key, currency, 1 if sign > 0 else 0),
+        ).fetchone()
+        now = utc_now_iso()
+        if existing is None:
+            record_id = new_id()
+            self._conn.execute(
+                "INSERT INTO recurring_candidates (id, merchant_key, currency, cadence_days, "
+                "typical_amount_minor, last_amount_minor, occurrences, first_date, last_date, "
+                "status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
+                (
+                    record_id,
+                    merchant_key,
+                    currency,
+                    cadence_days,
+                    typical_amount_minor,
+                    last_amount_minor,
+                    occurrences,
+                    first_date.isoformat(),
+                    last_date.isoformat(),
+                    now,
+                ),
+            )
+        else:
+            record_id = existing["id"]
+            self._conn.execute(
+                "UPDATE recurring_candidates SET cadence_days = ?, typical_amount_minor = ?, "
+                "last_amount_minor = ?, occurrences = ?, first_date = ?, last_date = ?, "
+                "updated_at = ? WHERE id = ?",
+                (
+                    cadence_days,
+                    typical_amount_minor,
+                    last_amount_minor,
+                    occurrences,
+                    first_date.isoformat(),
+                    last_date.isoformat(),
+                    now,
+                    record_id,
+                ),
+            )
+        return self.get(record_id)
+
+    def get(self, record_id: str) -> RecurringRecord:
+        row = self._conn.execute(
+            "SELECT * FROM recurring_candidates WHERE id = ?", (record_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError("recurring candidate not found")
+        return self._row(row)
+
+    def list_records(self, *, status: RecurringStatus | None = None) -> list[RecurringRecord]:
+        sql = "SELECT * FROM recurring_candidates"
+        params: list[object] = []
+        if status is not None:
+            sql += " WHERE status = ?"
+            params.append(status.value)
+        rows = self._conn.execute(sql + " ORDER BY merchant_key, currency, id", params).fetchall()
+        return [self._row(r) for r in rows]
+
+    def set_status(self, record_id: str, status: RecurringStatus) -> None:
+        self.get(record_id)
+        self._conn.execute(
+            "UPDATE recurring_candidates SET status = ?, updated_at = ? WHERE id = ?",
+            (status.value, utc_now_iso(), record_id),
+        )
+        self._audit.record(f"recurring_{status.value}", record_id)
 
 
 class ImportRepository:

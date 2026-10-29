@@ -202,6 +202,13 @@ beyond the draft above: enum values for `txn_type`, `category_source`, `review_s
 - **Read-only connection:** `sqlite3.connect("file:...?mode=ro", uri=True)` plus `PRAGMA query_only=ON`. The assistant executor receives only this connection.
 - **Indexes** target date-range, account, category, merchant and review queue queries.
 
+### Schema version 2 (as built)
+
+Migration 2 adds `categories.role` (`income`, `expense`, `transfer`, `cash_withdrawal`, `refund`, `savings`; see docs/05
+section 5.6), `anomaly_alerts.dedupe_key` with a partial unique index (one alert per rule and subject, in any status), and an
+index on `recurring_candidates(merchant_key, currency)`. It runs in one transaction after an automatic file backup, and is
+tested by upgrading a real version-1 database that contains user-created categories.
+
 ## 5. Migrations
 
 - `schema_version` table with monotonically increasing integer.

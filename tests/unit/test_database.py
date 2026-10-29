@@ -51,7 +51,7 @@ class TestMigrations:
 
     def test_migrate_is_idempotent(self, conn: sqlite3.Connection) -> None:
         assert migrate(conn) == LATEST_VERSION
-        assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == LATEST_VERSION
 
     def test_newer_database_refused(self, conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO schema_version VALUES (999, 'x')")
@@ -86,23 +86,25 @@ class TestMigrations:
         first = open_database(db)
         first.execute("INSERT INTO settings VALUES ('k', 'v', 'now')")
         first.close()
+        before = LATEST_VERSION
+        after = before + 1
 
-        def m002(c: sqlite3.Connection) -> None:
+        def add_note(c: sqlite3.Connection) -> None:
             c.execute("ALTER TABLE settings ADD COLUMN note TEXT")
 
         monkeypatch.setattr(
             migrations,
             "MIGRATIONS",
-            (*migrations.MIGRATIONS, migrations.Migration(2, "add note", m002)),
+            (*migrations.MIGRATIONS, migrations.Migration(after, "add note", add_note)),
         )
-        monkeypatch.setattr(migrations, "LATEST_VERSION", 2)
+        monkeypatch.setattr(migrations, "LATEST_VERSION", after)
 
         upgraded = open_database(db)
-        assert current_version(upgraded) == 2
+        assert current_version(upgraded) == after
         assert upgraded.execute("SELECT note FROM settings").fetchone()[0] is None
         upgraded.close()
 
-        backup = tmp_path / "bank.sqlite3.pre-v1.bak"
+        backup = tmp_path / f"bank.sqlite3.pre-v{before}.bak"
         assert backup.exists()
         old = sqlite3.connect(str(backup))
         try:
@@ -123,18 +125,19 @@ class TestMigrations:
             c.execute("ALTER TABLE settings ADD COLUMN half_done TEXT")
             c.execute("THIS IS NOT SQL")
 
+        before = LATEST_VERSION
         monkeypatch.setattr(
             migrations,
             "MIGRATIONS",
-            (*migrations.MIGRATIONS, migrations.Migration(2, "bad", bad)),
+            (*migrations.MIGRATIONS, migrations.Migration(before + 1, "bad", bad)),
         )
-        monkeypatch.setattr(migrations, "LATEST_VERSION", 2)
+        monkeypatch.setattr(migrations, "LATEST_VERSION", before + 1)
         with pytest.raises(sqlite3.OperationalError):
             open_database(db)
 
         monkeypatch.undo()
         again = open_database(db)
-        assert current_version(again) == 1
+        assert current_version(again) == before
         assert "half_done" not in [r[1] for r in again.execute("PRAGMA table_info(settings)")]
         again.close()
 
@@ -205,3 +208,67 @@ class TestSchemaConstraints:
     def test_invalid_enum_rejected(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO accounts VALUES ('a','A','bogus','USD',NULL,NULL,1,'now')")
+
+
+class TestUpgradeFromVersion1:
+    """A database created before category roles existed must upgrade without losing anything."""
+
+    @staticmethod
+    def make_v1(path: Path) -> sqlite3.Connection:
+        from bank_analyzer.database import migrations
+
+        conn = connect(path)
+        with transaction(conn):
+            migrations.MIGRATIONS[0].apply(conn)
+            conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, 'x')")
+        return conn
+
+    def test_roles_are_mapped_and_user_data_survives(self, tmp_path: Path) -> None:
+        db = tmp_path / "old.sqlite3"
+        conn = self.make_v1(db)
+        assert "role" not in [r[1] for r in conn.execute("PRAGMA table_info(categories)")]
+        for name, kind in (
+            ("My income", "income"),
+            ("My transfer", "transfer"),
+            ("My misc", "neutral"),
+            ("My spend", "expense"),
+        ):
+            conn.execute(
+                "INSERT INTO categories (id, name, kind, is_active, is_default, created_at) "
+                "VALUES (?, ?, ?, 1, 0, 'x')",
+                (name, name, kind),
+            )
+        conn.execute("INSERT INTO settings VALUES ('keep', 'me', 'x')")
+        conn.close()
+
+        upgraded = open_database(db)
+        roles = {
+            r["name"]: r["role"] for r in upgraded.execute("SELECT name, role FROM categories")
+        }
+        assert roles["Salary"] == "income" and roles["Income"] == "income"
+        assert roles["Transfers"] == "transfer"
+        assert roles["Cash withdrawals"] == "cash_withdrawal"
+        assert roles["Refunds"] == "refund"
+        assert roles["Savings and investments"] == "savings"
+        assert roles["Groceries"] == "expense" and roles["Other"] == "expense"
+        assert roles["My income"] == "income" and roles["My transfer"] == "transfer"
+        assert roles["My misc"] == "savings" and roles["My spend"] == "expense"
+        assert upgraded.execute("SELECT value FROM settings WHERE key='keep'").fetchone()[0] == "me"
+        assert current_version(upgraded) == LATEST_VERSION
+        assert (tmp_path / "old.sqlite3.pre-v1.bak").exists()
+        upgraded.close()
+
+    def test_invalid_role_is_rejected_by_the_database(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE categories SET role = 'bogus' WHERE name = 'Dining'")
+
+    def test_alert_dedupe_index_prevents_duplicates(self, conn: sqlite3.Connection) -> None:
+        sql = (
+            "INSERT INTO anomaly_alerts (id, rule_id, details_json, status, created_at, dedupe_key) "
+            "VALUES (?, 'A1', '{}', 'open', 'x', ?)"
+        )
+        conn.execute(sql, ("a1", "k"))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(sql, ("a2", "k"))
+        conn.execute(sql, ("a3", None))  # alerts without a key are not constrained
+        conn.execute(sql, ("a4", None))

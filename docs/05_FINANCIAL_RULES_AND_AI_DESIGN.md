@@ -117,6 +117,45 @@ Confidence: the UI shows `reason` and a label "AI suggestion (unverified)"; no p
 - **Descriptions** are sent only as the normalized text plus the direction (in/out), inside a JSON data block. Amounts,
   dates, balances, account names and ids are never sent.
 
+### 5.6 Implementation notes (Phase 5, as built)
+
+**Category roles.** The accounting treatment of a category is its explicit `role` (`income`, `expense`, `transfer`,
+`cash_withdrawal`, `refund`, `savings`), not its name or its coarse `kind`: cash withdrawals, refunds and savings are all
+`kind = neutral`, so `kind` alone cannot tell them apart, and names can be renamed. Roles were added by schema migration 2,
+which maps existing databases from the seeded names (or from `kind` for user-created categories) and takes a backup first.
+
+**Buckets.** Every transaction falls in exactly one bucket (see the `analytics.py` docstring). Uncategorized money out counts
+as spending and is flagged; uncategorized money in is *not* called income and is flagged. A tested identity ties every figure
+back to the raw total: raw net = income - spending - cash withdrawn + savings + matched transfers + unmatched transfers
++ uncategorized money in.
+
+**Refund linking.** A refund links to the latest earlier purchase in the same account and currency, from the same merchant,
+for exactly the refunded amount, within 90 days. History older than the period is used, so a refund can offset a purchase
+from last month. Partial refunds are *not* linked (they stay "unlinked refunds"); linking them would be a guess.
+
+**Savings rate** is available only for whole calendar months, with positive income, and when unmatched transfers plus
+uncategorized money in are at most 5% of income. Otherwise the reason is shown. Other currencies present in the period are
+named in a warning and excluded.
+
+**Transfers** are matched conservatively because a wrong link silently hides real income or spending. Automatic linking
+needs a unique 1-to-1 candidate *and* transfer evidence (a transfer category or wording such as "TRANSFER" or a card-payment
+phrase). Unique pairs without evidence are suggestions; pairs with several possible partners are listed as ambiguous. A link
+only sets `transfer_group_id`; no amount, category or description changes, and it can be undone.
+
+**Reconciliation** is per import. The mismatch `delta` (actual minus expected balance) equals the cash-flow amount of
+whatever is unaccounted for (for a deposit account, -200.00 means a withdrawal of 200.00 may be missing); no row is invented.
+After a mismatch the actual balance becomes the new anchor so one gap does not flag every later row. An opening balance
+applies to the earliest import only. "Missing balances" (`not_available`) and "failed" (`mismatch`) are different results.
+
+**Alerts.** Each rule needs enough history and otherwise reports why it stayed silent. New alerts cover only the last 90
+days of activity, so a first import of years of statements does not flood the user. Each alert has a stable identity key
+(a unique index), so re-running never recreates an alert in any status. Two rules can legitimately describe one
+transaction (a fixed-amount weekly payment that jumps is both A1 and A4); both are shown.
+
+**Known limits.** Thresholds are defaults, not tuned on real data. Alert text and amounts are stored locally in the
+database (needed to explain the comparison). Same-day rows are ordered by their position in the file, which can be
+ambiguous for balance checks. Recurring detection uses merchant keys, so a merchant whose descriptions vary a lot is missed.
+
 ## 6. Anomaly and Duplicate Rules
 
 | Rule ID | Condition | Default thresholds | Baseline shown |

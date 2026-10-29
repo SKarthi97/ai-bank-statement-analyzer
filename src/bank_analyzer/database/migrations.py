@@ -51,7 +51,35 @@ def _m001_initial(conn: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS: tuple[Migration, ...] = (Migration(1, "initial schema", _m001_initial),)
+_M002_STATEMENTS = (
+    # Analytics role of a category (see CategoryRole). Existing rows are mapped from their
+    # seeded names or, for user-created categories, from their kind.
+    "ALTER TABLE categories ADD COLUMN role TEXT NOT NULL DEFAULT 'expense' "
+    "CHECK (role IN ('income','expense','transfer','cash_withdrawal','refund','savings'))",
+    "UPDATE categories SET role = 'income' WHERE is_default = 1 AND name IN ('Income', 'Salary')",
+    "UPDATE categories SET role = 'transfer' WHERE is_default = 1 AND name = 'Transfers'",
+    "UPDATE categories SET role = 'cash_withdrawal' WHERE is_default = 1 AND name = 'Cash withdrawals'",
+    "UPDATE categories SET role = 'refund' WHERE is_default = 1 AND name = 'Refunds'",
+    "UPDATE categories SET role = 'savings' WHERE is_default = 1 AND name = 'Savings and investments'",
+    "UPDATE categories SET role = 'income' WHERE is_default = 0 AND kind = 'income'",
+    "UPDATE categories SET role = 'transfer' WHERE is_default = 0 AND kind = 'transfer'",
+    "UPDATE categories SET role = 'savings' WHERE is_default = 0 AND kind = 'neutral'",
+    # One alert per (rule, subject): re-running detection never recreates a dismissed alert.
+    "ALTER TABLE anomaly_alerts ADD COLUMN dedupe_key TEXT",
+    "CREATE UNIQUE INDEX idx_alerts_dedupe ON anomaly_alerts(dedupe_key) WHERE dedupe_key IS NOT NULL",
+    "CREATE INDEX idx_recurring_merchant ON recurring_candidates(merchant_key, currency)",
+)
+
+
+def _m002_roles_and_alert_keys(conn: sqlite3.Connection) -> None:
+    for statement in _M002_STATEMENTS:
+        conn.execute(statement)
+
+
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(1, "initial schema", _m001_initial),
+    Migration(2, "category roles, alert dedupe keys", _m002_roles_and_alert_keys),
+)
 LATEST_VERSION = MIGRATIONS[-1].version
 
 

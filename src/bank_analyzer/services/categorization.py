@@ -49,7 +49,7 @@ from bank_analyzer.domain.models import (
     CanonicalTransaction,
     CategorizationRule,
     Category,
-    CategoryKind,
+    CategoryRole,
     CategorySource,
     MatchType,
     ReviewStatus,
@@ -274,7 +274,7 @@ class Categorizer:
         self, txn: CanonicalTransaction, category: Category, report: CategorizationReport
     ) -> None:
         # An income category for money going out can only be a mistake or an attack.
-        if category.kind == CategoryKind.INCOME and txn.amount_minor < 0:
+        if category.role == CategoryRole.INCOME and txn.amount_minor < 0:
             report.llm_rejected_inconsistent += 1
             return
         if self._txns.apply_automated_category(

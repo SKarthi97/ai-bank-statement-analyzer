@@ -154,15 +154,15 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 | PDF text import | ◐ (Phase 3). Ruled tables are read and tested; text-aligned layouts that fragment cells are refused by design; no Phase-7 subprocess isolation yet |
 | OCR import | ◐ (Phase 3). TSV parsing, table building and confidence gating are tested; the real Tesseract call is NOT verified (Tesseract not installed during development; one optional `ocr` test is skipped) |
 | Column mapping + profiles | ◐ (Phase 3). Header-based suggestions and balance-based sign hints done; saved bank profiles not implemented |
-| Duplicate detection | ◐ (Phase 3). Import-time candidates against stored data are done; recurring/within-history duplicate analysis is Phase 5 |
-| Transfer matching | ☐ |
-| Balance reconciliation | ☐ |
+| Duplicate detection | ✔ (Phases 3 and 5): import-time candidates against stored rows, and history pairs with run-length context; candidates only, nothing is ever deleted |
+| Transfer matching | ✔ (Phase 5): conservative; only 1-to-1 pairs with transfer evidence are linked automatically, the rest are suggested or ambiguous for the user |
+| Balance reconciliation | ✔ (Phase 5): deposit and card/loan sign rules, newest-first detection, missing balances tolerated, per-import; tested on synthetic statements only |
 | Rule-based categorization | ✔ (Phase 4): user rules, approved merchant mappings, built-in rules |
 | LLM categorization | ◐ (Phase 4). Client, prompts, validation and gating are tested against a fake Ollama server and scripted models. NOT yet verified against a real Ollama (none installed during development) |
 | Review queue + bulk actions | ✔ (Phase 4, service layer; the review UI is Phase 6) |
-| Analytics catalogue | ☐ |
-| Recurring detection | ☐ |
-| Anomaly detection | ☐ |
+| Analytics catalogue | ✔ (Phase 5): all metrics in docs/05 section 3 except "unusual amounts" (alert A1) and recurring (own module); the assistant and UI are Phase 6 |
+| Recurring detection | ✔ (Phase 5) |
+| Anomaly detection | ✔ (Phase 5): rules A1-A6. Thresholds are defaults chosen by reasoning and synthetic data, not tuned on real statements |
 | Dashboard pages | ☐ |
 | AI assistant (planner/executor/validator) | ☐ |
 | Export with formula protection | ☐ |

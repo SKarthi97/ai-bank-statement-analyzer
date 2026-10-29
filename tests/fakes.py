@@ -214,6 +214,7 @@ def load_transactions(
                 merchant_key=merchant_key(normalized),
                 amount_minor=spec.get("amount", -1000),
                 currency=spec.get("currency", "USD"),
+                reported_balance_minor=spec.get("balance"),
                 source_ref=SourceRef(file_sha256="c" * 64, row_index=position),
                 created_at=now,
                 updated_at=now,
@@ -230,4 +231,11 @@ def load_transactions(
         created_at=now,
     )
     ImportRepository(conn).commit_import(batch, tuple(txns))
+    wanted = [(t, s["category"]) for t, s in zip(txns, specs, strict=True) if s.get("category")]
+    if wanted:
+        from bank_analyzer.database.repositories import CategoryRepository, TransactionRepository
+
+        categories, repo = CategoryRepository(conn), TransactionRepository(conn)
+        for txn, name in wanted:
+            repo.set_category_manual(txn.id, categories.get_by_name(name).id)
     return txns

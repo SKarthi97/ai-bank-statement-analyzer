@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
@@ -42,6 +42,21 @@ class CategoryKind(StrEnum):
     EXPENSE = "expense"
     TRANSFER = "transfer"
     NEUTRAL = "neutral"
+
+
+class CategoryRole(StrEnum):
+    """How analytics treats a category. Chosen explicitly, never inferred from the name.
+
+    ``kind`` is the coarse grouping (and what the model's sign check uses); ``role`` is the
+    precise accounting treatment. See docs/05 section 2.
+    """
+
+    INCOME = "income"  # counts as income
+    EXPENSE = "expense"  # counts as spending
+    TRANSFER = "transfer"  # movement between own accounts: excluded from income and spending
+    CASH_WITHDRAWAL = "cash_withdrawal"  # reported separately, not spending
+    REFUND = "refund"  # money back: reduces spending
+    SAVINGS = "savings"  # moved to savings/investments: excluded unless the user opts in
 
 
 class TxnType(StrEnum):
@@ -127,6 +142,27 @@ DEFAULT_CATEGORIES: tuple[tuple[str, CategoryKind], ...] = (
 )
 
 
+# Roles of the seeded categories. User-created categories choose their own role.
+DEFAULT_ROLES: dict[str, CategoryRole] = {
+    "Income": CategoryRole.INCOME,
+    "Salary": CategoryRole.INCOME,
+    "Transfers": CategoryRole.TRANSFER,
+    "Cash withdrawals": CategoryRole.CASH_WITHDRAWAL,
+    "Refunds": CategoryRole.REFUND,
+    "Savings and investments": CategoryRole.SAVINGS,
+}
+
+
+def default_role_for_kind(kind: CategoryKind) -> CategoryRole:
+    """The role a new category gets when the user does not choose one."""
+    return {
+        CategoryKind.INCOME: CategoryRole.INCOME,
+        CategoryKind.EXPENSE: CategoryRole.EXPENSE,
+        CategoryKind.TRANSFER: CategoryRole.TRANSFER,
+        CategoryKind.NEUTRAL: CategoryRole.SAVINGS,
+    }[kind]
+
+
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -148,6 +184,7 @@ class Category(_Frozen):
     id: str
     name: str = Field(min_length=1, max_length=100)
     kind: CategoryKind
+    role: CategoryRole = CategoryRole.EXPENSE
     is_active: bool = True
     is_default: bool = False
     merged_into_id: str | None = None
@@ -258,3 +295,45 @@ class MerchantMapping(_Frozen):
     merchant_key: str
     category_id: str
     approved_at: str
+
+
+class AlertStatus(StrEnum):
+    OPEN = "open"
+    DISMISSED = "dismissed"
+    CONFIRMED = "confirmed"
+
+
+class AnomalyAlert(_Frozen):
+    """An explainable flag. It states which rule fired and what it compared against."""
+
+    id: str
+    rule_id: str
+    transaction_id: str | None = None
+    related_transaction_ids: tuple[str, ...] = ()
+    details: dict[str, Any]
+    status: AlertStatus = AlertStatus.OPEN
+    dedupe_key: str | None = None
+    created_at: str
+    resolved_at: str | None = None
+
+
+class RecurringStatus(StrEnum):
+    CANDIDATE = "candidate"
+    CONFIRMED = "confirmed"
+    DISMISSED = "dismissed"
+
+
+class RecurringRecord(_Frozen):
+    """A stored recurring-payment candidate. The user may confirm or dismiss it."""
+
+    id: str
+    merchant_key: str
+    currency: str = Field(pattern=CURRENCY_PATTERN)
+    cadence_days: int
+    typical_amount_minor: StrictInt
+    last_amount_minor: StrictInt
+    occurrences: int
+    first_date: date
+    last_date: date
+    status: RecurringStatus = RecurringStatus.CANDIDATE
+    updated_at: str
