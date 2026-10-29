@@ -201,6 +201,16 @@ class TestStructureHandling:
         r = run([["2024-01-02", "A", "1.00", ""], ["", "Closing Balance", "", "1.00"]])
         assert r.issue_counts() == {I_FOOTER_SKIPPED: 1} and r.rows_skipped == 1
 
+    def test_totals_row_with_amounts_is_skipped_not_rejected(self) -> None:
+        mapping = ColumnMapping(date_col=0, description_col=1, debit_col=2, credit_col=3)
+        r = run(
+            [["2024-01-02", "Shop", "10.00", ""], ["", "Total", "10.00", "0.00"]],
+            mapping,
+            choices(SignConvention.DEBIT_CREDIT_COLUMNS),
+        )
+        assert len(r.transactions) == 1 and r.rows_rejected == 0
+        assert r.issue_counts() == {I_FOOTER_SKIPPED: 1}
+
     def test_continuation_line_merged(self) -> None:
         r = run([["2024-01-02", "ONLINE TRANSFER", "-5.00", ""], ["", "TO SAVINGS", "", ""]])
         assert len(r.transactions) == 1

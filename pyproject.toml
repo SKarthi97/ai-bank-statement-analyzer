@@ -44,3 +44,7 @@ strict = true
 mypy_path = "src"
 packages = ["bank_analyzer"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["openpyxl", "openpyxl.*"]
+ignore_missing_imports = true

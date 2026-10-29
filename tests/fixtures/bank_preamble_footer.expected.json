@@ -1,0 +1,9 @@
+{
+  "_note": "Hand-computed from bank_preamble_footer.csv (opening balance 2000.00). The Total row must not be imported.",
+  "currency": "USD",
+  "row_count": 3,
+  "total_credits": "200.00",
+  "total_debits": "-954.30",
+  "closing_balance": "1245.70",
+  "multiline_description": "SUPERMARKET BRANCH 12"
+}

@@ -1,0 +1,11 @@
+Acme Bank - Statement of Account
+Account: Checking (synthetic)
+Period: 2024-03-01 to 2024-03-31
+
+Transaction Date,Details,Debit,Credit,Balance
+2024-03-01,"RENT, MARCH",900.00,,1100.00
+2024-03-05,"SUPERMARKET
+BRANCH 12",54.30,,1045.70
+
+2024-03-09,PAYMENT RECEIVED,,200.00,1245.70
+,Total,954.30,200.00,

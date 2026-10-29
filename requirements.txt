@@ -1,7 +1,8 @@
 # Runtime dependencies, pinned to versions that were installed and tested together
 # (Python 3.11, Windows 11, 2026-10-29).
 #
-# Phases 1-2 only need pydantic. Later phases add streamlit, pandas, pdfplumber,
-# openpyxl, httpx, cryptography; each is added here, pinned after a real install,
+# Phases 1-3 (so far) need pydantic and openpyxl. Later phases add streamlit, pandas,
+# pdfplumber, httpx, cryptography; each is added here, pinned after a real install,
 # in the phase that first uses it. Nothing is listed that has not been tested.
 pydantic==2.14.1
+openpyxl==3.1.5

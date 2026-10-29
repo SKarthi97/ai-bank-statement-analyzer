@@ -31,6 +31,14 @@ class DateParseError(BankAnalyzerError, ValueError):
     """A date could not be interpreted with the chosen format."""
 
 
+class FileValidationError(BankAnalyzerError, ValueError):
+    """An uploaded file was rejected (type, size, signature or structure)."""
+
+
+class ImportStructureError(BankAnalyzerError, ValueError):
+    """A valid file could not be read as a statement table (no header, no delimiter...)."""
+
+
 class MappingError(BankAnalyzerError, ValueError):
     """The column mapping or import choices are inconsistent."""
 

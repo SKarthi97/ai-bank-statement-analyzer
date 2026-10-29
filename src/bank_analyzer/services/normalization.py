@@ -234,7 +234,8 @@ def normalize(
             if amounts_blank and not description:
                 skipped += 1
                 continue
-            if amounts_blank and _FOOTER.match(description):
+            # Totals rows usually carry sums in the amount columns, so no amounts_blank check.
+            if _FOOTER.match(description):
                 issue(Severity.INFO, I_FOOTER_SKIPPED, "Footer or summary row skipped.", row)
                 skipped += 1
                 continue
