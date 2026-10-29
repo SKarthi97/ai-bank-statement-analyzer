@@ -66,7 +66,8 @@ from bank_analyzer.domain.validation import (
 
 _CARD_MASK = re.compile(r"\b(?:X{2,}|\*{2,})\s?\d{2,4}\b|\*\d{2,4}\b")
 _CARD_NUMBER = re.compile(r"\bCARD\s*(?:NO\.?)?\s*\d{2,4}\b")
-_REF_TOKEN = re.compile(r"\b(?:REF|REFERENCE|TXN|TRN)\s*[:#]?\s*\S+")
+# (?![A-Z]) keeps "REF" from matching the start of words such as REFUND or REFERRAL.
+_REF_TOKEN = re.compile(r"\b(?:REF|REFERENCE|TXN|TRN)(?![A-Z])\s*[:#]?\s*\S+")
 _HASH_NUMBER = re.compile(r"#\s*\d+")
 _DATE_TOKEN = re.compile(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}[-.]\d{1,2}[-.]\d{2,4}\b")
 _LONG_DIGITS = re.compile(r"\b\d{5,}\b")

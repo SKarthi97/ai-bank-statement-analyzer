@@ -16,13 +16,17 @@ from bank_analyzer.domain.errors import InvalidStateError, NotFoundError
 from bank_analyzer.domain.models import (
     Account,
     AccountType,
+    AmountSign,
     BatchStatus,
     CanonicalTransaction,
+    CategorizationRule,
     Category,
     CategoryKind,
     CategorySource,
     ImportBatch,
     ImportSummary,
+    MatchType,
+    MerchantMapping,
     ReviewStatus,
     RollbackSummary,
     SourceRef,
@@ -417,10 +421,13 @@ class TransactionRepository:
     def set_category_manual(self, txn_id: str, category_id: str) -> None:
         """Record a user's category choice. It is approved and never overwritten by automation."""
         self.get(txn_id)
-        if not self._conn.execute(
-            "SELECT 1 FROM categories WHERE id = ?", (category_id,)
-        ).fetchone():
+        category = self._conn.execute(
+            "SELECT is_active FROM categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if category is None:
             raise NotFoundError("category not found")
+        if not category["is_active"]:
+            raise InvalidStateError("the category is disabled")
         self._conn.execute(
             "UPDATE transactions SET category_id = ?, category_source = ?, review_status = ?, "
             "updated_at = ? WHERE id = ?",
@@ -450,8 +457,51 @@ class TransactionRepository:
         cursor = self._conn.execute(
             "UPDATE transactions SET category_id = ?, category_source = ?, review_status = ?, "
             "updated_at = ? WHERE id = ? AND category_source = 'none' "
-            "AND review_status != 'approved' AND is_voided = 0",
+            "AND review_status NOT IN ('approved', 'rejected_suggestion') AND is_voided = 0",
             (category_id, source.value, review_status.value, utc_now_iso(), txn_id),
+        )
+        return cursor.rowcount == 1
+
+    def list_pending_categorization(
+        self, *, batch_id: str | None = None, limit: int | None = None
+    ) -> list[CanonicalTransaction]:
+        """Live rows automation may still categorize: no category, not approved, not rejected."""
+        sql = (
+            "SELECT * FROM transactions WHERE is_voided = 0 AND category_source = 'none' "
+            "AND review_status NOT IN ('approved', 'rejected_suggestion')"
+        )
+        params: list[object] = []
+        if batch_id is not None:
+            sql += " AND import_batch_id = ?"
+            params.append(batch_id)
+        sql += " ORDER BY txn_date, import_batch_id, id"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return [self._row(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    def approve_suggestion(self, txn_id: str) -> bool:
+        """Mark an automated category as confirmed by the user. False if nothing to approve."""
+        cursor = self._conn.execute(
+            "UPDATE transactions SET review_status = 'approved', updated_at = ? "
+            "WHERE id = ? AND category_id IS NOT NULL AND category_source != 'none' "
+            "AND review_status != 'approved' AND is_voided = 0",
+            (utc_now_iso(), txn_id),
+        )
+        return cursor.rowcount == 1
+
+    def reject_suggestion(self, txn_id: str) -> bool:
+        """Remove an automated category the user disagrees with.
+
+        The row is marked ``rejected_suggestion`` so automation does not propose it again.
+        Approved and manual categories are never touched. False if nothing was rejected.
+        """
+        cursor = self._conn.execute(
+            "UPDATE transactions SET category_id = NULL, category_source = 'none', "
+            "review_status = 'rejected_suggestion', updated_at = ? "
+            "WHERE id = ? AND category_source IN ('llm', 'builtin_rule', 'merchant_mapping', "
+            "'user_rule') AND review_status != 'approved' AND is_voided = 0",
+            (utc_now_iso(), txn_id),
         )
         return cursor.rowcount == 1
 
@@ -480,6 +530,145 @@ class TransactionRepository:
                 credits=Money(int(r["credits"]), r["currency"]),
                 debits=Money(int(r["debits"]), r["currency"]),
                 count=int(r["n"]),
+            )
+            for r in rows
+        ]
+
+
+class CategorizationRuleRepository:
+    """User-defined rules. Pattern syntax is validated by the service layer before saving."""
+
+    def __init__(self, conn: sqlite3.Connection, audit: AuditRepository | None = None) -> None:
+        self._conn = conn
+        self._audit = audit or AuditRepository(conn)
+
+    @staticmethod
+    def _row(row: sqlite3.Row) -> CategorizationRule:
+        return CategorizationRule(
+            id=row["id"],
+            priority=row["priority"],
+            match_type=MatchType(row["match_type"]),
+            pattern=row["pattern"],
+            amount_sign=AmountSign(row["amount_sign"]) if row["amount_sign"] else None,
+            category_id=row["category_id"],
+            is_active=bool(row["is_active"]),
+            created_at=row["created_at"],
+        )
+
+    def add(
+        self,
+        *,
+        match_type: MatchType,
+        pattern: str,
+        category_id: str,
+        amount_sign: AmountSign | None = None,
+        priority: int | None = None,
+    ) -> CategorizationRule:
+        """Save a rule; by default it runs after all existing rules."""
+        if priority is None:
+            top = self._conn.execute("SELECT MAX(priority) FROM categorization_rules").fetchone()[0]
+            priority = (top or 0) + 10
+        rule = CategorizationRule(
+            id=new_id(),
+            priority=priority,
+            match_type=match_type,
+            pattern=pattern,
+            amount_sign=amount_sign,
+            category_id=category_id,
+            created_at=utc_now_iso(),
+        )
+        try:
+            self._conn.execute(
+                "INSERT INTO categorization_rules (id, priority, match_type, pattern, amount_sign, "
+                "category_id, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    rule.id,
+                    rule.priority,
+                    rule.match_type.value,
+                    rule.pattern,
+                    rule.amount_sign.value if rule.amount_sign else None,
+                    rule.category_id,
+                    rule.created_at,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise NotFoundError("category not found") from exc
+        self._audit.record("rule_added", rule.id)
+        return rule
+
+    def list_rules(self, *, active_only: bool = True) -> list[CategorizationRule]:
+        sql = "SELECT * FROM categorization_rules" + (" WHERE is_active = 1" if active_only else "")
+        rows = self._conn.execute(sql + " ORDER BY priority, created_at, id").fetchall()
+        return [self._row(r) for r in rows]
+
+    def set_active(self, rule_id: str, active: bool) -> None:
+        cursor = self._conn.execute(
+            "UPDATE categorization_rules SET is_active = ? WHERE id = ?",
+            (1 if active else 0, rule_id),
+        )
+        if cursor.rowcount == 0:
+            raise NotFoundError("rule not found")
+        self._audit.record("rule_changed", rule_id)
+
+    def set_priority(self, rule_id: str, priority: int) -> None:
+        cursor = self._conn.execute(
+            "UPDATE categorization_rules SET priority = ? WHERE id = ?", (priority, rule_id)
+        )
+        if cursor.rowcount == 0:
+            raise NotFoundError("rule not found")
+        self._audit.record("rule_changed", rule_id)
+
+    def delete(self, rule_id: str) -> None:
+        cursor = self._conn.execute("DELETE FROM categorization_rules WHERE id = ?", (rule_id,))
+        if cursor.rowcount == 0:
+            raise NotFoundError("rule not found")
+        self._audit.record("rule_deleted", rule_id)
+
+
+class MerchantMappingRepository:
+    """Merchants the user has approved for a category. Written only by explicit user actions."""
+
+    def __init__(self, conn: sqlite3.Connection, audit: AuditRepository | None = None) -> None:
+        self._conn = conn
+        self._audit = audit or AuditRepository(conn)
+
+    def get(self, merchant_key: str) -> str | None:
+        """The approved category id for ``merchant_key``, if any."""
+        row = self._conn.execute(
+            "SELECT category_id FROM merchant_mappings WHERE merchant_key = ?", (merchant_key,)
+        ).fetchone()
+        return None if row is None else str(row["category_id"])
+
+    def upsert(self, merchant_key: str, category_id: str) -> None:
+        try:
+            self._conn.execute(
+                "INSERT INTO merchant_mappings (merchant_key, category_id, approved_at) "
+                "VALUES (?, ?, ?) ON CONFLICT(merchant_key) DO UPDATE SET "
+                "category_id = excluded.category_id, approved_at = excluded.approved_at",
+                (merchant_key, category_id, utc_now_iso()),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise NotFoundError("category not found") from exc
+        self._audit.record("merchant_mapping_saved")
+
+    def delete(self, merchant_key: str) -> None:
+        cursor = self._conn.execute(
+            "DELETE FROM merchant_mappings WHERE merchant_key = ?", (merchant_key,)
+        )
+        if cursor.rowcount == 0:
+            raise NotFoundError("merchant mapping not found")
+        self._audit.record("merchant_mapping_deleted")
+
+    def list_mappings(self) -> list[MerchantMapping]:
+        rows = self._conn.execute(
+            "SELECT merchant_key, category_id, approved_at FROM merchant_mappings "
+            "ORDER BY merchant_key"
+        ).fetchall()
+        return [
+            MerchantMapping(
+                merchant_key=r["merchant_key"],
+                category_id=r["category_id"],
+                approved_at=r["approved_at"],
             )
             for r in rows
         ]

@@ -75,6 +75,18 @@ class ReviewStatus(StrEnum):
     REJECTED_SUGGESTION = "rejected_suggestion"
 
 
+class MatchType(StrEnum):
+    CONTAINS = "contains"
+    STARTS_WITH = "starts_with"
+    REGEX = "regex"
+    MERCHANT_KEY = "merchant_key"
+
+
+class AmountSign(StrEnum):
+    IN = "in"
+    OUT = "out"
+
+
 class FileKind(StrEnum):
     CSV = "csv"
     XLSX = "xlsx"
@@ -225,3 +237,24 @@ class ImportSummary(_Frozen):
 class RollbackSummary(_Frozen):
     batch_id: str
     voided: int
+
+
+class CategorizationRule(_Frozen):
+    """A user-defined rule. Lower ``priority`` runs first; the first match wins."""
+
+    id: str
+    priority: int
+    match_type: MatchType
+    pattern: str = Field(min_length=1, max_length=200)
+    amount_sign: AmountSign | None = None
+    category_id: str
+    is_active: bool = True
+    created_at: str
+
+
+class MerchantMapping(_Frozen):
+    """A merchant the user has approved for a category."""
+
+    merchant_key: str
+    category_id: str
+    approved_at: str

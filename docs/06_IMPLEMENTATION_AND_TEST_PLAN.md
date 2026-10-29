@@ -157,9 +157,9 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 | Duplicate detection | ◐ (Phase 3). Import-time candidates against stored data are done; recurring/within-history duplicate analysis is Phase 5 |
 | Transfer matching | ☐ |
 | Balance reconciliation | ☐ |
-| Rule-based categorization | ☐ |
-| LLM categorization | ☐ |
-| Review queue + bulk actions | ☐ |
+| Rule-based categorization | ✔ (Phase 4): user rules, approved merchant mappings, built-in rules |
+| LLM categorization | ◐ (Phase 4). Client, prompts, validation and gating are tested against a fake Ollama server and scripted models. NOT yet verified against a real Ollama (none installed during development) |
+| Review queue + bulk actions | ✔ (Phase 4, service layer; the review UI is Phase 6) |
 | Analytics catalogue | ☐ |
 | Recurring detection | ☐ |
 | Anomaly detection | ☐ |

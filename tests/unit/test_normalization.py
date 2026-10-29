@@ -356,3 +356,26 @@ class TestOcrConfidence:
         raw = RawTable("0" * 64, FileKind.PDF_OCR, (), (bad,))
         r = normalize(raw, SIGNED, choices(), import_batch_id="b", today=TODAY)
         assert r.low_confidence_rows == () and r.rows_rejected == 1
+
+
+class TestReferenceTokensDoNotEatWords:
+    """Regression: a 'REF...' prefix used to delete whole words such as REFUND and REFERRAL."""
+
+    @pytest.mark.parametrize(
+        ("original", "normalized"),
+        [
+            ("REFUND GROCERY MART", "REFUND GROCERY MART"),
+            ("REFERRAL BONUS", "REFERRAL BONUS"),
+            ("REFRESH SPA", "REFRESH SPA"),
+            ("REFINANCE FEE", "REFINANCE FEE"),
+            ("SHOP REF123456 PAID", "SHOP PAID"),
+            ("SHOP REF: AB12 PAID", "SHOP PAID"),
+            ("SHOP REFERENCE 99 PAID", "SHOP PAID"),
+            ("SHOP TXN#778 PAID", "SHOP PAID"),
+            ("SHOP TRN 5 PAID", "SHOP PAID"),
+        ],
+    )
+    def test_reference_numbers_removed_but_ordinary_words_kept(
+        self, original: str, normalized: str
+    ) -> None:
+        assert normalize_description(original) == normalized
