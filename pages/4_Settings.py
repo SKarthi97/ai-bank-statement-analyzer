@@ -1,6 +1,8 @@
-"""Settings: accounts, import history (with undo), categories, rules, local AI and data location."""
+"""Settings: accounts, import history (with undo), categories, rules, local AI, privacy and security."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import streamlit as st
 from app_support import run_page
@@ -19,7 +21,22 @@ from bank_analyzer.domain.models import (
     CategoryRole,
     MatchType,
 )
+from bank_analyzer.security.network_guard import guard_active
+from bank_analyzer.security.passcode import (
+    PasscodeError,
+    clear_passcode,
+    has_passcode,
+    set_passcode,
+)
+from bank_analyzer.security.permissions import audit_data_dir
+from bank_analyzer.services.backup import (
+    SUFFIX,
+    backup_notice,
+    create_backup,
+    verify_backup,
+)
 from bank_analyzer.services.categorization import Categorizer
+from bank_analyzer.services.wipe import CONFIRMATION, wipe_data
 from bank_analyzer.ui.context import AppContext
 from bank_analyzer.ui.display import safe_cell
 
@@ -169,13 +186,113 @@ def _data(ctx: AppContext) -> None:
     )
 
 
+def _security(ctx: AppContext) -> None:
+    st.subheader("Privacy and security")
+    st.text(
+        "Outbound network guard: "
+        + ("ON (only localhost is reachable from this app)" if guard_active() else "OFF")
+    )
+    st.caption(
+        "The guard covers this app's own code only, not Ollama or your browser. For a firm "
+        "guarantee, block outbound access with your operating system's firewall."
+    )
+    warnings = audit_data_dir(ctx.settings.data_dir, ctx.settings.db_path)
+    for warning in warnings:
+        st.warning(warning)
+    if not warnings:
+        st.caption("The data folder looks private to your user account.")
+    st.caption(
+        "The database file is not encrypted by this app. Use full-disk encryption (BitLocker, FileVault)."
+    )
+
+
+def _passcode(ctx: AppContext) -> None:
+    st.subheader("Start-up passcode (optional)")
+    data_dir = ctx.settings.data_dir
+    st.caption(
+        "Keeps casual visitors out of the app. It does not encrypt your data: anyone who can read "
+        "the files can still read them."
+    )
+    with st.form("passcode_form", clear_on_submit=True):
+        current = st.text_input("Current passcode (if one is set)", type="password")
+        new = st.text_input("New passcode (at least 8 characters)", type="password")
+        a, b = st.columns(2)
+        save = a.form_submit_button("Set or change passcode")
+        remove = b.form_submit_button("Remove passcode")
+        try:
+            if save:
+                set_passcode(data_dir, new, current=current)
+                st.success("Passcode saved.")
+            elif remove:
+                clear_passcode(data_dir, current)
+                st.success("Passcode removed.")
+        except PasscodeError as exc:
+            st.error(str(exc))
+    st.text("Passcode: " + ("set" if has_passcode(data_dir) else "not set"))
+
+
+def _backups(ctx: AppContext) -> None:
+    st.subheader("Encrypted backup")
+    folder = ctx.settings.data_dir / "backups"
+    st.caption(backup_notice())
+    with st.form("backup_form"):
+        passphrase = st.text_input("Passphrase (at least 12 characters)", type="password")
+        make = st.form_submit_button("Create backup")
+        check = st.form_submit_button("Verify newest backup")
+    if make:
+        name = f"bankanalyzer-{datetime.now():%Y%m%d-%H%M%S}{SUFFIX}"
+        info = create_backup(ctx.conn, folder / name, passphrase)
+        st.success(f"Backup written: {name} ({info.size_bytes:,} bytes).")
+    if check:
+        existing = sorted(folder.glob(f"*{SUFFIX}")) if folder.is_dir() else []
+        if not existing:
+            st.warning("There are no backups yet.")
+        else:
+            info = verify_backup(existing[-1], passphrase)
+            st.success(f"{existing[-1].name} decrypts and passes its integrity check.")
+    st.caption(
+        "To restore, close this app and run: python scripts/restore_backup.py <backup file>. "
+        "Restoring replaces the database, after keeping a copy of the old one."
+    )
+    st.text(f"Backups folder: {folder}")
+
+
+def _wipe(ctx: AppContext) -> None:
+    st.subheader("Delete all data")
+    st.caption(
+        "Overwrites and removes the database, logs and passcode. Backups are kept unless you tick "
+        "the box. This is best effort: see the limits shown after deletion."
+    )
+    with st.form("wipe_form"):
+        typed = st.text_input(f"Type {CONFIRMATION} to confirm")
+        with_backups = st.checkbox("Also delete the backups folder")
+        go = st.form_submit_button("Delete everything")
+    if go:
+        ctx.close()  # an open database file cannot be removed on Windows
+        report = wipe_data(
+            ctx.settings.data_dir,
+            ctx.settings.db_path,
+            confirmation=typed,
+            include_backups_folder=with_backups,
+        )
+        st.success(f"Removed {len(report.removed)} files.")
+        if report.failed:
+            st.error("Could not remove: " + ", ".join(report.failed))
+        for limit in report.limits:
+            st.warning(limit)
+
+
 def main(ctx: AppContext) -> None:
     _accounts(ctx)
     _imports(ctx)
     _categories(ctx)
     _rules(ctx)
     _ai(ctx)
+    _security(ctx)
+    _passcode(ctx)
+    _backups(ctx)
     _data(ctx)
+    _wipe(ctx)
 
 
 run_page("Settings", main)

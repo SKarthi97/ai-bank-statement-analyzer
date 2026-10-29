@@ -18,8 +18,8 @@ from bank_analyzer.domain.dates import DATE_FORMATS, detect_date_format
 from bank_analyzer.domain.errors import NeedsOcrError
 from bank_analyzer.domain.imports import ColumnMapping, ImportChoices, RawTable, SignConvention
 from bank_analyzer.domain.models import AccountType
-from bank_analyzer.importer import extract_table
 from bank_analyzer.importer.column_mapper import infer_sign_convention, suggest_mapping
+from bank_analyzer.importer.isolated import extract_table_isolated
 from bank_analyzer.security.file_security import staged_upload
 from bank_analyzer.services.categorization import Categorizer
 from bank_analyzer.services.import_service import commit_preview, prepare_preview
@@ -67,7 +67,7 @@ def _read_upload(ctx: AppContext) -> None:
                 max_mb_tabular=s.max_upload_mb_tabular,
                 max_mb_pdf=s.max_upload_mb_pdf,
             ) as staged:
-                raw = extract_table(staged, max_pdf_pages=s.max_pdf_pages, use_ocr=use_ocr)
+                raw = extract_table_isolated(staged, max_pdf_pages=s.max_pdf_pages, use_ocr=use_ocr)
         except NeedsOcrError as exc:
             st.warning(f"{exc} Tick the OCR box and read the file again.")
             return

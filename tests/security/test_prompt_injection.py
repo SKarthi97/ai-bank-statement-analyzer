@@ -254,12 +254,16 @@ class TestNoExecutionOrExfiltrationPaths:
         assert not self.matches(modules, self.FORBIDDEN_MODULES), modules
         assert not self.matches(modules, self.NETWORK_MODULES), modules
 
+    # local_llm.py is the loopback model client. network_guard.py imports socket only to RESTRICT
+    # it (it blocks non-loopback connections); it never opens one.
+    NETWORK_ALLOWED = frozenset({"local_llm.py", "network_guard.py"})
+
     def test_only_the_loopback_client_touches_the_network(self) -> None:
         offenders = {}
         for path in SRC.rglob("*.py"):
             _, modules = self.calls_and_imports(path)
             hits = self.matches(modules, self.NETWORK_MODULES)
-            if hits and path.name != "local_llm.py":
+            if hits and path.name not in self.NETWORK_ALLOWED:
                 offenders[path.name] = sorted(hits)
         assert offenders == {}
 

@@ -40,10 +40,14 @@ class Settings:
 
 def is_loopback_url(url: str) -> bool:
     """True if ``url`` is http(s) and its host is localhost or a loopback IP."""
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed = urlparse(url)
+        host_name = parsed.hostname
+    except ValueError:  # malformed, e.g. an unbalanced IPv6 bracket
         return False
-    host = parsed.hostname
+    if parsed.scheme not in {"http", "https"} or not host_name:
+        return False
+    host = host_name
     if host.lower() in _LOOPBACK_NAMES:
         return True
     try:

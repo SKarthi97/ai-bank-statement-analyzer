@@ -17,6 +17,9 @@ from assistant_data import TODAY, load_history
 from bank_analyzer.database.migrations import open_database
 from bank_analyzer.database.repositories import AccountRepository
 from bank_analyzer.domain.models import AccountType
+from bank_analyzer.security.logging_config import shutdown_logging
+from bank_analyzer.security.network_guard import guard_active, uninstall_guard
+from bank_analyzer.security.passcode import set_passcode
 from stub_streamlit import FakeStreamlit, fake_pandas
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +60,8 @@ def run(page: str, monkeypatch: pytest.MonkeyPatch, fake: FakeStreamlit) -> None
         runpy.run_path(str(ROOT / page), run_name="__main__")
     finally:
         sys.modules.pop("app_support", None)
+        uninstall_guard()  # run_page installs the guard in this process
+        shutdown_logging()  # and a log file handler
 
 
 def seed(data: Path, *, history: bool) -> None:
@@ -132,3 +137,93 @@ def test_the_import_is_not_saved_without_the_confirmation_box(
         assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+class TestSecurityWiring:
+    def test_the_guard_and_scrubbed_log_are_set_up_on_every_page(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=False)
+        seen: dict[str, bool] = {}
+        fake = FakeStreamlit()
+        original = fake.widget
+
+        def spy(name: str):  # noqa: ANN202
+            if name == "title":
+                seen["guard"] = guard_active()
+            return original(name)
+
+        fake.widget = spy  # type: ignore[method-assign]
+        run("app.py", monkeypatch, fake)
+        assert (env / "logs").is_dir()
+        assert not guard_active()  # the helper removed it again
+
+    def test_the_guard_is_active_while_the_page_body_runs(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=False)
+        fake = FakeStreamlit()
+        states: list[bool] = []
+        original = fake.widget
+
+        def spy(name: str):  # noqa: ANN202
+            if name == "metric":
+                states.append(guard_active())
+            return original(name)
+
+        fake.widget = spy  # type: ignore[method-assign]
+        run("app.py", monkeypatch, fake)
+        assert states
+        assert all(states)
+
+    def test_the_guard_can_be_switched_off_by_setting(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BANKAN_BLOCK_OUTBOUND", "0")
+        seed(env, history=False)
+        fake = FakeStreamlit()
+        states: list[bool] = []
+        original = fake.widget
+
+        def spy(name: str):  # noqa: ANN202
+            if name == "metric":
+                states.append(guard_active())
+            return original(name)
+
+        fake.widget = spy  # type: ignore[method-assign]
+        run("app.py", monkeypatch, fake)
+        assert states
+        assert not any(states)
+
+    def test_a_passcode_blocks_the_page_until_unlocked(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=True)
+        set_passcode(env, "open sesame 42", kdf=(2**10, 8, 1))
+        locked = FakeStreamlit()
+        run("app.py", monkeypatch, locked)
+        assert "metric" not in locked.calls  # nothing of the app was shown
+        assert "text_input" in locked.calls  # the passcode prompt was
+
+        unlocked = FakeStreamlit()
+        unlocked.session_state["unlocked"] = True
+        run("app.py", monkeypatch, unlocked)
+        assert "metric" in unlocked.calls
+
+    def test_a_wrong_passcode_does_not_unlock(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=True)
+        set_passcode(env, "open sesame 42", kdf=(2**10, 8, 1))
+        fake = FakeStreamlit(clicks={"Unlock"})  # the stub's text input answers ""
+        run("app.py", monkeypatch, fake)
+        assert not fake.session_state.get("unlocked")
+        assert "metric" not in fake.calls
+
+    def test_the_transactions_page_offers_a_csv_download(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=True)
+        fake = FakeStreamlit()
+        run("pages/1_Transactions.py", monkeypatch, fake)
+        assert "download_button" in fake.calls

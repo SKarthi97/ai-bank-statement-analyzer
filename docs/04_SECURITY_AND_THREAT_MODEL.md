@@ -69,6 +69,47 @@
 | Localhost binding config | `.streamlit/config.toml`, launcher | `test_streamlit_config.py` |
 | No external URLs in code/assets | CI grep + `verify_offline.py` | `test_no_remote_references.py` |
 
+### 4.1 Implementation notes (Phase 7, as built)
+
+Test files differ from the names in the table above; the real ones are `tests/security/test_redaction_and_logging.py`,
+`test_network_guard.py`, `test_csv_formula_injection.py`, `test_backup_restore.py`, `test_passcode_permissions_wipe.py`,
+`test_isolated_parsing.py` and `test_no_remote_references.py`.
+
+- **Logging.** Everything under the `bank_analyzer` logger goes to a size-limited file in `<data dir>/logs`, through a filter
+  that redacts the message and drops the raw arguments. Exceptions are written as class name plus file and line only; their
+  messages (which can contain data) never reach the file. Records do not propagate to other handlers. The rule for callers is
+  to log events, counts and ids, not descriptions or amounts: redaction recognises amounts, long digit runs, IBANs, e-mail
+  addresses and URL queries, but it cannot recognise a free-text description.
+- **Network guard.** Replaces `socket.connect`, `connect_ex`, `getaddrinfo` and `gethostbyname` so anything but loopback raises
+  `NetworkBlocked` (an `OSError`). It covers Python code in this process only; Ollama, Tesseract, the browser and child
+  processes are outside it, and native code can bypass it. It is installed by `app_support.run_page` unless
+  `BANKAN_BLOCK_OUTBOUND=0`. It is defence in depth, not a sandbox.
+- **Export.** CSV only, UTF-8 with BOM. Text cells whose first non-space character is `= + - @`, tab, CR or LF get a leading
+  apostrophe; amounts are written from `Money` and stay numeric. The apostrophe is visible in some tools. The file itself is not
+  encrypted.
+- **Backup.** `BANKBAK1` header (scrypt parameters, salt, nonce) is authenticated as AES-GCM associated data; the passphrase is
+  never stored; a wrong passphrase and a damaged file give the same message. Created with SQLite's online backup, integrity-checked
+  before encryption and again after decryption. Refused: passphrases under 12 characters, hostile key-derivation settings,
+  newer-schema databases, replacing an existing database without confirmation (the replaced one is kept as `*.pre-restore.bak`).
+  Backing up while the same connection has an open transaction is refused: SQLite's backup would otherwise wait forever.
+  Limits: encrypted in memory (1 GB cap); a weak passphrase can be guessed offline; a backup copied to a synced folder leaves
+  the computer.
+- **Parser isolation.** PDF, Excel and OCR parsing runs in a child process: wall-clock timeout (killed), memory cap (Windows job
+  object assigned right after start, so a tiny window exists; POSIX `RLIMIT_AS` set by the child), minimal environment (no
+  proxies or tokens), stderr discarded, reply parsed as JSON only, error types limited to the application's own. The child has
+  the same user, files and network access as the app, so this contains crashes and runaway memory, not a deliberate exploit.
+- **Passcode.** Optional. scrypt hash, constant-time comparison, lockout that grows after five misses and survives restarts.
+  It keeps casual visitors and pages that can reach the local port out of the UI; it does not encrypt the database, and anyone who
+  can edit the data folder can remove it.
+- **Permissions.** `audit_private_path` reports broad Windows principals (Everyone, Users, Authenticated Users) by reading
+  `icacls` output, or group/other bits on POSIX. It reports only. English group names only.
+- **Wipe.** Overwrite with zeros, then delete the database, journal files, automatic copies, logs and passcode; the backups folder
+  only if asked. A typed phrase is required. The result lists the limits (SSD wear-levelling, sync folders, earlier backups,
+  caches and swap, exports).
+- **Offline verification.** `scripts/verify_offline.py` scans the application's own files for non-loopback URLs, `<script src>`,
+  CSS imports, CDN hosts and telemetry package names, and checks `.streamlit/config.toml` (loopback address, usage statistics
+  off, XSRF protection on) and the settings. The dynamic procedure in section 6 is **not automated and was not performed**.
+
 ## 5. Localhost Exposure vs. Browser Risk (explained)
 
 - **Network exposure:** binding to `127.0.0.1` means other machines cannot connect. Binding to `0.0.0.0` would expose the app to the LAN. The app refuses to start with a non-loopback address unless an explicit override is set, and the override prints a warning.

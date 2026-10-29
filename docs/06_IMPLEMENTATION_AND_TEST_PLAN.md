@@ -165,12 +165,16 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 | Anomaly detection | ✔ (Phase 5): rules A1-A6. Thresholds are defaults chosen by reasoning and synthetic data, not tuned on real statements |
 | Dashboard pages | ◐ (Phase 6): Overview, Import Center, Transactions (+ review queue), Analytics, AI Assistant and Settings are written and their own code runs end to end against a stand-in Streamlit (`tests/ui/test_pages_stub.py`). They have NOT been run under real Streamlit: it could not be installed in the environment where they were written. Once Streamlit is installed, run `tests/ui/test_pages_apptest.py` and open the app once. Not built: transfer-link management, category merge/rename UI, CSV export |
 | AI assistant (planner/executor/validator) | ✔ (Phase 6): closed catalogue of 11 plans, rule planner then optional model planner, read-only executor, template answers with optional model rephrasing whose numbers are checked. The model path is tested only against fake models, never a real Ollama |
-| Export with formula protection | ☐ |
-| Backup/restore (encrypted) | ☐ |
-| Logging/redaction | ☐ |
-| Network guard + offline verification | ☐ |
-| README / SECURITY / PRIVACY | ☐ |
-| Offline bundle script | ☐ |
+| Export with formula protection | ✔ (Phase 7): CSV only (`services/exporter.py`); text cells starting with `= + - @`, tab, CR or newline (also after leading spaces) get a `'` prefix; amounts stay numbers. XLSX export not built. Transactions page has a download button (page unverified under real Streamlit) |
+| Backup/restore (encrypted) | ✔ (Phase 7): `services/backup.py` (AES-256-GCM, scrypt, authenticated header), integrity check on create and restore, replaced database is kept, `scripts/restore_backup.py`. Settings page can create and verify (unverified under real Streamlit); restore is CLI only |
+| Logging/redaction | ✔ (Phase 7): `security/redaction.py`, `logging_config.py`. Messages scrubbed, exception messages never written, no propagation to other handlers. Redaction is pattern-based; the policy is to log events and counts, not data |
+| Network guard + offline verification | ◐ (Phase 7): app-level guard (`security/network_guard.py`) and static/config check (`scripts/verify_offline.py`, `security/offline_check.py`) done and tested. The guard has NOT been run with real Streamlit (it could break server start-up; set `BANKAN_BLOCK_OUTBOUND=0` if so). The dynamic connection check in docs/04 section 6 was not performed |
+| README / SECURITY / PRIVACY | ☐ (Phase 8) |
+| Offline bundle script | ☐ (Phase 8) |
+| Parser isolation | ✔ (Phase 7): `importer/isolated.py` runs parsers in a child process with a timeout and a memory cap (Windows job object, POSIX `RLIMIT_AS`), minimal environment, validated reply. Not a sandbox. Memory cap tested on Windows only |
+| Start-up passcode | ✔ (Phase 7): `security/passcode.py` scrypt hash, constant-time compare, persisted lockout; gate in `app_support.py` (unverified under real Streamlit). Not encryption |
+| Permission audit | ✔ (Phase 7): `security/permissions.py` reads the real Windows ACL with `icacls` (tested against real output) or POSIX modes; reports only, never changes permissions |
+| Full data wipe | ✔ (Phase 7): `services/wipe.py` overwrite then delete with a typed confirmation and a stated list of limits; Settings page (unverified under real Streamlit) |
 
 ## 7. Open Decisions Needing the Owner's Input (non-blocking; defaults in brackets)
 
@@ -180,5 +184,5 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 4. Optional start-up passcode for the web UI [off by default, recommended on shared machines].
 5. Whether the account alias may include last-4 digits [optional, off].
 6. Repository path is inside OneDrive: confirm that source code may stay there but the data directory must not [yes].
-7. Whether to run parsers in an isolated subprocess [yes in Phase 7].
+7. Whether to run parsers in an isolated subprocess [done in Phase 7].
 | Import preview + confirmation gates | ✔ (Phase 3 service layer; the Phase 6 Import Center page drives it, run end to end only against a stand-in Streamlit) |

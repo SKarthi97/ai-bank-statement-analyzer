@@ -15,6 +15,7 @@ from bank_analyzer.database.repositories import (
 )
 from bank_analyzer.domain.models import ReviewStatus
 from bank_analyzer.services.categorization import Categorizer
+from bank_analyzer.services.exporter import transactions_csv
 from bank_analyzer.ui.context import AppContext
 from bank_analyzer.ui.display import page_summary, transaction_rows
 
@@ -57,6 +58,13 @@ def _browse(ctx: AppContext) -> None:
     page = TransactionRepository(ctx.conn).query(flt, PageRequest(page=int(number), page_size=size))
     st.caption(page_summary(page))
     st.dataframe(transaction_rows(page.items, by_id), hide_index=True)
+    st.download_button(
+        "Download these filtered transactions (CSV)",
+        data=transactions_csv(TransactionRepository(ctx.conn).fetch_all(flt), by_id, accounts),
+        file_name="transactions.csv",
+        mime="text/csv",
+        help="Spreadsheet formulas in descriptions are neutralized. The file is not encrypted.",
+    )
 
 
 def _review(ctx: AppContext) -> None:
