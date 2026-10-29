@@ -1,0 +1,13 @@
+{
+  "_note": "Hand-computed from deposit_basic.csv, independent of application code. Opening balance 500.00.",
+  "currency": "USD",
+  "row_count": 9,
+  "months": {
+    "2024-01": {"credits": "3000.00", "debits": "-221.39", "count": 4},
+    "2024-02": {"credits": "3012.50", "debits": "-384.20", "count": 5}
+  },
+  "total_credits": "6012.50",
+  "total_debits": "-605.59",
+  "net": "5406.91",
+  "closing_balance": "5906.91"
+}

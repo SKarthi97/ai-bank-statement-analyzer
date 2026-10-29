@@ -32,9 +32,11 @@ Invariants:
 
 ## 2. Money Handling
 
-- Parse text → `Decimal` using explicit separators (never locale guess) → quantize using currency exponent with
-  `ROUND_HALF_EVEN` only if the source has more digits than the exponent allows (and flag a warning); otherwise exact.
-- Convert to integer minor units. Sum in integers. Convert to `Decimal` only to display.
+- Parse text directly to integer minor units using explicit separators (never a locale guess); no float or Decimal is
+  involved in parsing. **Implemented policy (stricter than the first draft):** a value with more decimal places than the
+  currency allows is *rejected* (`PrecisionError`), never rounded; trailing zeros (`1.2300`) are accepted. Rounding exists
+  only as an explicit opt-in on `Money.from_decimal(..., round_excess=True)`.
+- Integer minor units are the stored form. Sum in integers. Convert to `Decimal` only to display.
 - Currency exponent table: default 2; JPY/KRW/CLP 0; BHD/KWD/OMR/JOD/TND 3.
 - Formats handled: `1,234.56`, `1.234,56`, `1 234,56`, `(123.45)` negative, `123.45-` trailing minus, `123.45 DR/CR`, currency symbols.
 - Ambiguity examples that must prompt: `1,234` (thousands or decimal?), `01/02/2024` (DMY vs MDY) when both interpretations are valid across the whole column.
@@ -182,7 +184,13 @@ CREATE TABLE audit_events (
 );
 ```
 
-Seed data: default categories (kind assigned: Income/Salary/Refunds = income; Transfers/Savings and investments = transfer or neutral; rest = expense).
+Seed data: 21 default categories. Implemented kinds: Income and Salary = income; Transfers = transfer; Cash withdrawals,
+Refunds, Savings and investments = neutral (reported separately so they are not double counted, see doc 05 section 2);
+all others = expense.
+
+Implementation notes (schema v1 as built, `src/bank_analyzer/database/schema.sql`): the schema adds CHECK constraints
+beyond the draft above: enum values for `txn_type`, `category_source`, `review_status`, `file_kind`, `status`; and
+`CHECK ((category_id IS NULL) = (category_source = 'none'))`, so a category can never exist without a recorded source.
 
 ## 4. Design Notes
 

@@ -218,3 +218,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Project-specific: financial data must never be committed ----
+data/*
+!data/.gitkeep
+!data/README.md
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.bak
+*.bankbak
+exports/
+statements/
+
+# Real statements: only synthetic fixtures under tests/fixtures are allowed
+*.pdf
+!tests/fixtures/**/*.pdf
+*.xlsx
+!tests/fixtures/**/*.xlsx
+
+# Local tooling
+.claude/

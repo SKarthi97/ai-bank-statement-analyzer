@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bank-statement-analyzer"
+version = "0.1.0"
+description = "Offline, privacy-first personal bank statement analyzer"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.7,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bank_analyzer = ["database/schema.sql"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "live_llm: needs an installed local Ollama model (optional)",
+    "ocr: needs a local Tesseract install (optional)",
+    "slow: slow tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Design docs contain illustrative code blocks that must not be reformatted.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# Long SQL string literals cannot be wrapped by the formatter; code lines are wrapped by
+# `ruff format` (line-length above).
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+packages = ["bank_analyzer"]
+plugins = ["pydantic.mypy"]

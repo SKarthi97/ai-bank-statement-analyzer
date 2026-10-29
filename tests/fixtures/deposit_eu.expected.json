@@ -1,0 +1,8 @@
+{
+  "_note": "Hand-computed from deposit_eu.csv (EUR, DD.MM.YYYY, decimal comma, separate debit/credit).",
+  "currency": "EUR",
+  "row_count": 3,
+  "total_credits": "2500.50",
+  "total_debits": "-1245.30",
+  "closing_balance": "1255.20"
+}

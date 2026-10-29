@@ -145,10 +145,10 @@ Legend: ☐ unimplemented, ◐ partial, ☑ implemented, ✔ tested. Update only
 
 | Feature | Status |
 |---------|--------|
-| Money type and parsing | ☐ |
-| Canonical model + validation | ☐ |
-| SQLite schema + migrations | ☐ |
-| Repositories + rollback | ☐ |
+| Money type and parsing | ✔ (Phase 2) |
+| Canonical model + validation | ✔ (Phase 2) |
+| SQLite schema + migrations | ✔ (Phase 2) |
+| Repositories + rollback | ✔ (Phase 2) |
 | CSV import | ☐ |
 | XLSX import | ☐ |
 | PDF text import | ☐ |
