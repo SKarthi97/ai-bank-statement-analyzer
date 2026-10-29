@@ -227,3 +227,28 @@ class TestSecurityWiring:
         fake = FakeStreamlit()
         run("pages/1_Transactions.py", monkeypatch, fake)
         assert "download_button" in fake.calls
+
+
+class TestPhase8Pages:
+    def test_analytics_lists_recurring_payments(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=True)
+        fake = FakeStreamlit()
+        run("pages/2_Analytics.py", monkeypatch, fake)
+        rows = [r for table in fake.shown if isinstance(table, list) for r in table if "Every" in r]
+        assert sorted(r["Merchant"] for r in rows) == [
+            "ACME PAYROLL",
+            "STREAMLY",
+        ]  # payroll recurs too
+        higher = {r["Merchant"] for r in rows if r["Recently higher"] == "yes"}
+        assert higher == {"STREAMLY"}  # 9.99 twice, then 14.99; the salary did not change
+
+    def test_settings_can_check_database_integrity(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=True)
+        fake = FakeStreamlit(clicks={"Check database integrity"})
+        run("pages/4_Settings.py", monkeypatch, fake)
+        assert "Check database integrity" in fake.clicked
+        assert "success" in fake.calls

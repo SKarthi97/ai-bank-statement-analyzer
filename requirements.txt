@@ -1,17 +1,35 @@
-# Runtime dependencies, pinned to versions that were installed and tested together
-# (Python 3.11, Windows 11, 2026-10-29).
+# Runtime dependencies, pinned to the versions that were installed and tested together
+# (Python 3.11, Windows 11, 2026-10-29). `pip check` reports no conflicts for this set.
 #
-# Phases 1-3 need pydantic, openpyxl and pdfplumber (its pdfminer.six / pypdfium2 / Pillow
-# dependencies are pinned too, since they parse untrusted files). Later phases add streamlit,
-# pandas, httpx, cryptography; each is added here, pinned after a real install,
-# in the phase that first uses it. Nothing is listed that has not been tested.
+# Direct dependencies and the packages they pull in are all pinned, because several of them parse
+# untrusted files (pdfplumber, pdfminer.six, pypdfium2, pillow, openpyxl) or handle secrets
+# (cryptography, cffi, pycparser). Nothing is listed that has not been tested.
+#
+# Hashes are NOT included: they could not be generated without network access. To lock them,
+# run `pip-compile --generate-hashes` (pip-tools) on an online machine and install with
+# `pip install --require-hashes`.
+#
+# Not pinned yet: streamlit (and pandas, which it installs). It could not be installed in the
+# environment where the UI was written, so no version has been tested. After you install it,
+# run `python -m pytest tests/ui`, then add the passing versions below.
+
+# core
 pydantic==2.14.1
+pydantic_core==2.50.1
+annotated-types==0.8.0
+typing_extensions==4.16.0
+typing-inspection==0.4.4
+
+# import: Excel and PDF (parse untrusted files)
 openpyxl==3.1.5
+et_xmlfile==2.0.0
 pdfplumber==0.11.10
 pdfminer.six==20260107
+charset-normalizer==3.5.2
 pypdfium2==5.14.0
 pillow==13.0.0
 
-# Phase 6 (web UI): streamlit is NOT pinned yet. It could not be installed in the environment where
-# Phase 6 was written (no network access), so no version has been tested. After you install it
-# yourself, run `python -m pytest tests/ui`, then pin the streamlit and pandas versions that pass.
+# encrypted backups and the optional passcode
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.12

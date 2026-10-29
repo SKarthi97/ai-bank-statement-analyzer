@@ -7,7 +7,17 @@ name = "bank-statement-analyzer"
 version = "0.1.0"
 description = "Offline, privacy-first personal bank statement analyzer"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.7,<3"]
+dependencies = [
+    "pydantic>=2.7,<3",
+    "openpyxl>=3.1,<4",
+    "pdfplumber>=0.11,<1",
+    "cryptography>=42",
+]
+
+[project.optional-dependencies]
+# The web UI. Exact tested pins for everything are in requirements.txt.
+ui = ["streamlit"]
+dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "reportlab"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

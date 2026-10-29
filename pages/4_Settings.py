@@ -8,6 +8,7 @@ import streamlit as st
 from app_support import run_page
 
 from bank_analyzer.ai.selftest import run_selftest
+from bank_analyzer.database.maintenance import check_integrity
 from bank_analyzer.database.repositories import (
     AccountRepository,
     CategorizationRuleRepository,
@@ -206,6 +207,14 @@ def _security(ctx: AppContext) -> None:
     )
 
 
+def _health(ctx: AppContext) -> None:
+    st.subheader("Database health")
+    if st.button("Check database integrity"):
+        report = check_integrity(ctx.conn)
+        (st.success if report.ok else st.error)(report.summary)
+        st.caption(f"Schema version {report.schema_version}.")
+
+
 def _passcode(ctx: AppContext) -> None:
     st.subheader("Start-up passcode (optional)")
     data_dir = ctx.settings.data_dir
@@ -289,6 +298,7 @@ def main(ctx: AppContext) -> None:
     _rules(ctx)
     _ai(ctx)
     _security(ctx)
+    _health(ctx)
     _passcode(ctx)
     _backups(ctx)
     _data(ctx)

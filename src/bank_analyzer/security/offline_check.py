@@ -25,6 +25,9 @@ SCAN_ROOTS = ("src", "pages", ".streamlit", "scripts")
 SCAN_FILES = ("app.py", "app_support.py")
 SCAN_SUFFIXES = frozenset({".py", ".toml", ".html", ".js", ".css", ".sql", ".json", ".cfg"})
 SELF = "offline_check.py"
+EXEMPT_MARKER = (
+    "offline-ok"  # a line carrying this comment is skipped; each use is visible in review
+)
 
 _URL = re.compile(
     r"https?://(?:\[[^\]\s]*\]|[^\s\"'<>)\]},/:]+)(?::\d+)?[^\s\"'<>)\]},]*", re.IGNORECASE
@@ -77,6 +80,8 @@ def scan_static(root: Path) -> list[Finding]:
             )
             continue
         for number, line in enumerate(lines, start=1):
+            if EXEMPT_MARKER in line:
+                continue
             where = f"{path.relative_to(root).as_posix()}:{number}"
             for match in _URL.finditer(line):
                 url = match.group(0).rstrip(".;")

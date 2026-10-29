@@ -67,7 +67,12 @@ def _read_upload(ctx: AppContext) -> None:
                 max_mb_tabular=s.max_upload_mb_tabular,
                 max_mb_pdf=s.max_upload_mb_pdf,
             ) as staged:
-                raw = extract_table_isolated(staged, max_pdf_pages=s.max_pdf_pages, use_ocr=use_ocr)
+                raw = extract_table_isolated(
+                    staged,
+                    max_pdf_pages=s.max_pdf_pages,
+                    use_ocr=use_ocr,
+                    tesseract_cmd=s.tesseract_cmd,
+                )
         except NeedsOcrError as exc:
             st.warning(f"{exc} Tick the OCR box and read the file again.")
             return

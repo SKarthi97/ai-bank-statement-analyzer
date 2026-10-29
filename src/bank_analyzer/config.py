@@ -36,6 +36,7 @@ class Settings:
     llm_timeout_s: int
     block_outbound: bool
     allow_remote_llm: bool
+    tesseract_cmd: str | None = None
 
 
 def is_loopback_url(url: str) -> bool:
@@ -144,4 +145,5 @@ def load_settings(
         llm_timeout_s=_int(env, "BANKAN_LLM_TIMEOUT_S", 60, minimum=1, maximum=3600),
         block_outbound=_bool(env, "BANKAN_BLOCK_OUTBOUND", True),
         allow_remote_llm=allow_remote,
+        tesseract_cmd=(env.get("BANKAN_TESSERACT_CMD") or "").strip() or None,
     )

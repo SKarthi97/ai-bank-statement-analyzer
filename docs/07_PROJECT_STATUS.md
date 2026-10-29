@@ -1,6 +1,7 @@
 # 07. Project Status: Built, Pending, Improvements and Testing
 
-Last updated after Phase 7 (2026-10-29). This is a status record, not a plan: update it only from evidence (a test that
+Last updated after Phase 8 (2026-10-29). All eight phases are built; the system is **not yet accepted as finished**: see
+[08_ACCEPTANCE_REPORT.md](08_ACCEPTANCE_REPORT.md) section 5 for what must still be done. This is a status record, not a plan: update it only from evidence (a test that
 ran, a file that exists). Design intent lives in docs 00-06; this file says what is actually true now.
 
 Legend: **Done** = built and tested here. **Written, unverified** = code exists but has not been run in its real
@@ -23,6 +24,9 @@ environment. **Pending** = not started.
 | 7 | Scrubbed logging, redaction, application-level network guard, offline verification script | Done (guard unverified with real Streamlit) | `security/redaction.py`, `logging_config.py`, `network_guard.py`, `offline_check.py`, `scripts/verify_offline.py` |
 | 7 | Encrypted backup/restore, formula-safe CSV export, full wipe | Done | `services/backup.py`, `exporter.py`, `wipe.py`, `scripts/restore_backup.py` |
 | 7 | Parser isolation (child process, timeout, memory cap), optional passcode, permission audit | Done (passcode gate unverified with real Streamlit) | `importer/isolated.py`, `_worker.py`, `security/passcode.py`, `permissions.py` |
+| 8 | README, SECURITY, PRIVACY, troubleshooting, firewall guidance, acceptance report | Done | `README.md`, `SECURITY.md`, `PRIVACY.md`, `docs/08_ACCEPTANCE_REPORT.md` |
+| 8 | Setup script, safe launcher, offline bundle tooling, database integrity check, pinned dependencies | Done (wheel download never run) | `scripts/setup_environment.py`, `run_app.py`, `make_offline_bundle.py`, `deploy.py`, `database/maintenance.py`, `requirements.txt` |
+| 8 | Recurring-payments list on Analytics, integrity button on Settings, `BANKAN_TESSERACT_CMD` | Done (pages unverified under real Streamlit) | `pages/2_Analytics.py`, `pages/4_Settings.py`, `config.py` |
 
 ### Properties that hold by design (and are tested)
 - Money is an integer plus an ISO currency. No floats in calculations. Currencies are never added together.
@@ -41,10 +45,16 @@ environment. **Pending** = not started.
 
 ## 2. What is pending
 
-### Roadmap phases not started
-| Phase | Scope |
-|-------|-------|
-| 8 | Packaging: README, SECURITY, PRIVACY, troubleshooting, offline install bundle script, per-OS firewall commands, final acceptance run against doc 01 |
+### Roadmap
+All eight phases are built. What remains is verification and tuning, not construction (below).
+
+### Phase 8 items not done
+- `pip download` for the offline bundle, `pip-audit`, and hash generation (all need the internet).
+- Streamlit is not pinned (could not be installed here).
+- macOS and Linux instructions are written but untested.
+- Memory use was not measured (the doc 01 target of under 1 GB).
+- Per `docs/08_ACCEPTANCE_REPORT.md`: saved import profiles (IMP-09), UI for category rename/merge (CAT-02), alert-threshold and
+  retention settings (ANO-02, UI-06), and the Overview page's trend chart, category breakdown and recent transactions (UI-01).
 
 ### Phase 7 items not done
 - The **dynamic** offline check (watching real connections while the app runs, docs/04 section 6) was not performed or automated.
@@ -52,7 +62,7 @@ environment. **Pending** = not started.
 - Optional SQLite encryption (not claimed; use full-disk encryption).
 - Saved data-retention settings.
 
-### Phase 6 and 7 follow-through (needed before calling the UI done)
+### Follow-through (needed before calling the system done; mirrors the acceptance report)
 0. Phase 7 added three things that run inside the page runner and have never run under real Streamlit: the outbound
    network guard, the passcode gate and the Settings security sections. If the app will not start, set
    `BANKAN_BLOCK_OUTBOUND=0` and report it: the guard is the most likely cause.
@@ -122,8 +132,8 @@ Ordered by value to a real user.
 .venv\Scripts\python.exe -m pytest --cov=bank_analyzer
 ```
 
-### Latest result (after Phase 7)
-ruff clean, mypy strict clean (59 source files), **1329 passed, 3 skipped**, coverage about **97%** of `src/bank_analyzer`.
+### Latest result (after Phase 8)
+ruff clean, mypy strict clean (61 source files), **1364 passed, 3 skipped**, coverage about **97%** of `src/bank_analyzer`.
 Skipped: live Tesseract OCR; real-Streamlit `AppTest` pages (Streamlit not installed); a POSIX-only permission test (this is Windows).
 `python scripts/verify_offline.py` passes (0 remote references, configuration local-only).
 
@@ -133,6 +143,7 @@ Skipped: live Tesseract OCR; real-Streamlit `AppTest` pages (Streamlit not insta
 | `tests/unit/` | Money, dates, models, database, importers, normalization, rules, categorization, analytics, transfers, reconciliation, recurring, anomaly rules, query plans, planner, answer checking, UI support |
 | `tests/integration/` | CSV/Excel/PDF import end to end, categorization pipeline, analytics pipeline on a real statement, anomaly service, assistant on a hand-computed database |
 | `tests/security/` | Prompt injection, assistant safety, redaction and logging, network guard, CSV formula injection, backup/restore (wrong passphrase, every tampered region, hostile KDF cost), passcode lockout, permission audit (including real `icacls` output), wipe, isolated parsing (timeout, memory cap, forged replies), no remote references |
+| `tests/acceptance/` | The doc 01 performance targets (10k-row import, 100k-row queries) and the audit-log content rule |
 | `tests/ui/` | Pages against a stand-in Streamlit (runs now); real `AppTest` pages (activates when Streamlit is installed) |
 | `tests/fixtures/` | Synthetic CSV, XLSX and PDF files, with builders and expected-value oracles |
 

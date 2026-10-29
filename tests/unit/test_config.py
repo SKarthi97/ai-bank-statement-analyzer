@@ -97,3 +97,16 @@ def test_sync_folder_warning() -> None:
     risky = Path("C:/Users/a/OneDrive - Corp/Desktop/data")
     assert sync_folder_warning(risky) is not None
     assert sync_folder_warning(Path("C:/Users/a/AppData/Local/BankAnalyzer")) is None
+
+
+def test_tesseract_command_comes_from_the_environment() -> None:
+    home = Path("C:/Users/x")
+    assert load_settings({}, platform="win32", home=home).tesseract_cmd is None
+    blank = load_settings({"BANKAN_TESSERACT_CMD": "  "}, platform="win32", home=home)
+    assert blank.tesseract_cmd is None
+    chosen = load_settings(
+        {"BANKAN_TESSERACT_CMD": "C:/Program Files/Tesseract-OCR/tesseract.exe"},
+        platform="win32",
+        home=home,
+    )
+    assert chosen.tesseract_cmd == "C:/Program Files/Tesseract-OCR/tesseract.exe"

@@ -9,12 +9,13 @@ import pandas as pd
 import streamlit as st
 from app_support import run_page
 
-from bank_analyzer.database.repositories import AccountRepository
+from bank_analyzer.database.repositories import AccountRepository, TransactionRepository
 from bank_analyzer.domain.money import Money
 from bank_analyzer.domain.periods import DateRange
 from bank_analyzer.services.analytics import Analyzer
 from bank_analyzer.services.anomaly_detection import AnomalyService, describe_alert
 from bank_analyzer.services.reconciliation import ReconStatus, reconcile_account
+from bank_analyzer.services.recurring import amount_changes, detect_recurring
 from bank_analyzer.ui.context import AppContext
 from bank_analyzer.ui.display import safe_cell
 from bank_analyzer.ui.overview import available_months
@@ -128,6 +129,34 @@ def _breakdowns(analyzer: Analyzer, period: DateRange, currency: str) -> None:
     )
 
 
+def _recurring(ctx: AppContext) -> None:
+    st.subheader("Recurring payments")
+    st.caption(
+        "Merchants that charge or pay you about the same amount at a regular interval (at least 3 "
+        "times). These are detected from your history, not confirmed by you."
+    )
+    candidates = detect_recurring(TransactionRepository(ctx.conn).fetch_all())
+    if not candidates:
+        st.write("None found yet.")
+        return
+    increased = {c.candidate.merchant_key for c in amount_changes(candidates)}
+    st.dataframe(
+        [
+            {
+                "Merchant": safe_cell(c.merchant_key),
+                "Every": c.cadence_label,
+                "Typical amount": Money(c.typical_amount_minor, c.currency).format(),
+                "Latest": Money(c.last_amount_minor, c.currency).format(),
+                "Times": c.occurrences,
+                "Amount stable": "yes" if c.amount_stable else "no",
+                "Recently higher": "yes" if c.merchant_key in increased else "",
+            }
+            for c in candidates
+        ],
+        hide_index=True,
+    )
+
+
 def _alerts(ctx: AppContext) -> None:
     st.subheader("Unusual activity")
     st.caption(
@@ -189,6 +218,7 @@ def main(ctx: AppContext) -> None:
         st.caption(f"Period {period.label()}, currency {currency}.")
         _figures(analyzer, period, currency)
         _breakdowns(analyzer, period, currency)
+    _recurring(ctx)
     _alerts(ctx)
     _reconciliation(ctx)
 
