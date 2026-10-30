@@ -189,6 +189,7 @@ def _table_from_json(data: dict[str, Any]) -> RawTable:
             for r in data["rows"]
         ),
         warnings=tuple(str(w) for w in data.get("warnings", ())),
+        context_text=str(data.get("context_text", ""))[:4000],
     )
 
 

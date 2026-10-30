@@ -27,12 +27,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-import pdfplumber
-
 from bank_analyzer.domain.errors import FileValidationError, ImportStructureError
 from bank_analyzer.domain.imports import RawRow, RawTable
 from bank_analyzer.domain.models import FileKind
 from bank_analyzer.importer.column_mapper import find_header_row
+from bank_analyzer.importer.pdf_importer import open_pdf
 
 DEFAULT_DPI = 200
 DEFAULT_TIMEOUT_S = 120
@@ -213,6 +212,7 @@ def read_pdf_ocr(
     dpi: int = DEFAULT_DPI,
     min_confidence: float = 80.0,
     runner: Runner | None = None,
+    password: str | None = None,
 ) -> RawTable:
     """OCR a scanned PDF into a RawTable. Requires a local Tesseract (or an injected runner)."""
     run = runner
@@ -226,10 +226,7 @@ def read_pdf_ocr(
         def run(image: Path) -> str:
             return run_tesseract(command, image)
 
-    try:
-        pdf = pdfplumber.open(path)
-    except Exception as exc:  # third-party parser boundary
-        raise ImportStructureError("The PDF could not be read.") from exc
+    pdf = open_pdf(path, password)
     pages_rows: list[list[OcrRow]] = []
     workdir = Path(tempfile.mkdtemp(prefix="bankan-ocr-"))
     try:

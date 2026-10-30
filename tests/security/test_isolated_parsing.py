@@ -15,7 +15,7 @@ from bank_analyzer.domain.errors import (
 from bank_analyzer.importer import extract_table, isolated
 from bank_analyzer.importer.isolated import _child_env, extract_table_isolated, run_limited
 from bank_analyzer.security.file_security import staged_upload
-from helpers import FIXTURES
+from helpers import FIXTURES, write_shaded_statement
 
 FIXTURE_FILES = [
     "deposit_basic.csv",
@@ -173,3 +173,48 @@ def test_a_forged_type_naming_a_non_application_class_is_not_rebuilt(
         extract_table_isolated(staged)
     assert not isinstance(info.value, RuntimeError)
     assert "boom" not in str(info.value)
+
+
+class TestPasswordReachesTheChildSafely:
+    def _locked(self, tmp_path: Path) -> Path:
+        path = tmp_path / "locked.pdf"
+        write_shaded_statement(
+            path, ("DATE", "PARTICULARS", "PAYMENTS", "RECEIPTS", "BALANCE"), "pw-12345"
+        )
+        return path
+
+    def test_round_trip_with_the_right_password(self, tmp_path: Path) -> None:
+        with staged_upload(self._locked(tmp_path)) as staged:
+            table = extract_table_isolated(staged, timeout_s=60, password="pw-12345")
+        assert len(table.rows) == 5
+
+    def test_missing_and_wrong_passwords_keep_their_types_across_the_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        from bank_analyzer.domain.errors import PasswordRequiredError, WrongPasswordError
+
+        path = self._locked(tmp_path)
+        with staged_upload(path) as staged:
+            with pytest.raises(PasswordRequiredError):
+                extract_table_isolated(staged, timeout_s=60)
+            with pytest.raises(WrongPasswordError):
+                extract_table_isolated(staged, timeout_s=60, password="nope")
+
+    def test_the_password_travels_on_stdin_only_never_argv_or_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, object] = {}
+        real = isolated.run_limited
+
+        def spy(command, stdin_bytes, **kwargs):  # type: ignore[no-untyped-def]
+            seen["command"] = list(command)
+            seen["stdin"] = stdin_bytes
+            seen["env"] = _child_env()
+            return real(command, stdin_bytes, **kwargs)
+
+        monkeypatch.setattr(isolated, "run_limited", spy)
+        with staged_upload(self._locked(tmp_path)) as staged:
+            extract_table_isolated(staged, timeout_s=60, password="pw-12345")
+        assert b"pw-12345" in seen["stdin"]  # type: ignore[operator]
+        assert all("pw-12345" not in part for part in seen["command"])  # type: ignore[attr-defined]
+        assert all("pw-12345" not in value for value in seen["env"].values())  # type: ignore[attr-defined]

@@ -28,6 +28,7 @@ _PARAMS = (
     "max_pdf_pages",
     "use_ocr",
     "tesseract_cmd",
+    "password",
 )
 
 
@@ -57,6 +58,7 @@ def _table_to_json(table: Any) -> dict[str, Any]:
             for r in table.rows
         ],
         "warnings": list(table.warnings),
+        "context_text": table.context_text,
     }
 
 

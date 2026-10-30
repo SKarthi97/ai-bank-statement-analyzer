@@ -40,6 +40,7 @@ MAX_ZIP_RATIO = 100  # per-entry uncompressed/compressed ratio
 _EXTENSIONS = {".csv": FileKind.CSV, ".xlsx": FileKind.XLSX, ".pdf": FileKind.PDF}
 _STAGED_SUFFIX = {FileKind.CSV: ".csv", FileKind.XLSX: ".xlsx", FileKind.PDF: ".pdf"}
 _PDF_ACTIVE_CONTENT = re.compile(rb"/(JavaScript|JS|Launch|EmbeddedFile)(?![A-Za-z0-9])")
+_PDF_ENCRYPTED = re.compile(rb"/Encrypt(?![A-Za-z0-9])")
 
 
 def ensure_private_dir(path: Path) -> Path:
@@ -128,12 +129,18 @@ def _check_pdf_content(path: Path) -> tuple[str, ...]:
     if b"%PDF-" not in data[:1024]:
         raise FileValidationError("The file is not a valid PDF document.")
     found = sorted({m.group(1).decode() for m in _PDF_ACTIVE_CONTENT.finditer(data)})
+    warnings: list[str] = []
     if found:
-        return (
+        warnings.append(
             "The PDF contains embedded active content "
-            f"({', '.join(found)}). It was ignored and nothing was run.",
+            f"({', '.join(found)}). It was ignored and nothing was run."
         )
-    return ()
+    if _PDF_ENCRYPTED.search(data):
+        warnings.append(
+            "The PDF is encrypted, so the check for embedded scripts could not look inside it. "
+            "This application never runs PDF scripts."
+        )
+    return tuple(warnings)
 
 
 @dataclass(frozen=True, slots=True)

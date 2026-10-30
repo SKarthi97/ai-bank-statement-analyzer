@@ -132,10 +132,29 @@ Ordered by value to a real user.
 .venv\Scripts\python.exe -m pytest --cov=bank_analyzer
 ```
 
-### Latest result (after Phase 8)
-ruff clean, mypy strict clean (61 source files), **1364 passed, 3 skipped**, coverage about **97%** of `src/bank_analyzer`.
-Skipped: live Tesseract OCR; real-Streamlit `AppTest` pages (Streamlit not installed); a POSIX-only permission test (this is Windows).
+### Latest result (after the Docker and statement-understanding work)
+ruff clean, mypy strict clean (64 source files). **Windows:** 1427 passed, 3 skipped. **Docker (Linux, Python 3.11, real
+Streamlit and Tesseract):** 1411 passed, 25 skipped (the stub-harness tests skip when real Streamlit is present). Coverage
+was last measured after Phase 8 (about 97%) and has not been re-measured.
 `python scripts/verify_offline.py` passes (0 remote references, configuration local-only).
+
+### Statement understanding (after Phase 8)
+Built: `importer/layout.py` (a statement's layout, applied and then **checked against the document's own arithmetic**:
+running balance, closing balance, footer totals), `importer/heuristics.py` (rules read standard layouts with no model),
+`ai/statement_reader.py` (local model fallback; validated JSON; one retry; model output repaired by rules where a fact
+can be established, e.g. number separators), a word-position PDF table extractor (columns from blank gutters, refuses
+when ambiguous), PDF header/footer text carried to the layout step, year-less dates (year found in the document text),
+B/F and C/F rows set aside. Import Center has an opt-in "Analyze the layout" step: a reading is offered for use only if
+the checks agree.
+Verified for real (invented statement in the layout of a real bank PDF, real PDF reader): rules read it in 0.1 s with
+all four checks passing; with unfamiliar column headings, the real `llama3.2:3b` read the layout and all checks passed
+(about 3 minutes, one retry). Earlier, an unrepaired 3B answer had wrong separators and no balance column, and the checks
+correctly rejected it. `qwen2.5:7b` took about 8 minutes per call on this machine (4-core CPU, no usable GPU) and
+once returned an unusable layout; it has not been re-tested since the prompt was shortened.
+**Not verified:** any real bank statement (only the screenshot layout, rebuilt with invented numbers); DR/CR indicator
+layouts are not arithmetic-checked; password-protected PDFs are handled (typed password, tested end to end with a generated encrypted PDF) but never with a real bank's encryption; saved import
+profiles (IMP-09) not built; the new Import Center step has been exercised only by the stub tests and never clicked in a
+browser; multi-page statements with repeated headings are covered by the old extractor only.
 
 ### Layout
 | Folder | Contents |

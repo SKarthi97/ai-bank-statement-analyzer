@@ -43,6 +43,14 @@ class NeedsOcrError(ImportStructureError):
     """A PDF has no text layer (a scan). The UI may offer the optional OCR path."""
 
 
+class PasswordRequiredError(ImportStructureError):
+    """The PDF is password-protected and no password was supplied."""
+
+
+class WrongPasswordError(ImportStructureError):
+    """The supplied password does not open the PDF."""
+
+
 class MappingError(BankAnalyzerError, ValueError):
     """The column mapping or import choices are inconsistent."""
 

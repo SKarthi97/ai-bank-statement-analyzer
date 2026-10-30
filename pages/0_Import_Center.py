@@ -13,12 +13,14 @@ import streamlit as st
 from app_support import run_page
 from pydantic import ValidationError
 
+from bank_analyzer.ai.statement_reader import Understanding, understand
 from bank_analyzer.database.repositories import AccountRepository
 from bank_analyzer.domain.dates import DATE_FORMATS, detect_date_format
-from bank_analyzer.domain.errors import NeedsOcrError
+from bank_analyzer.domain.errors import NeedsOcrError, PasswordRequiredError, WrongPasswordError
 from bank_analyzer.domain.imports import ColumnMapping, ImportChoices, RawTable, SignConvention
 from bank_analyzer.domain.models import AccountType
 from bank_analyzer.importer.column_mapper import infer_sign_convention, suggest_mapping
+from bank_analyzer.importer.heuristics import dates_have_no_year
 from bank_analyzer.importer.isolated import extract_table_isolated
 from bank_analyzer.security.file_security import staged_upload
 from bank_analyzer.services.categorization import Categorizer
@@ -53,9 +55,16 @@ def _account_section(ctx: AppContext) -> str | None:
 def _read_upload(ctx: AppContext) -> None:
     uploaded = st.file_uploader("Statement file", type=["csv", "xlsx", "pdf"])
     use_ocr = st.checkbox("This PDF is a scan: use local OCR (Tesseract must be installed)")
+    password = st.text_input(
+        "PDF password (only if the PDF asks for one)",
+        type="password",
+        help="Used once to open this file. It is held in memory only, never saved, logged or sent "
+        "anywhere. The imported transactions are saved in the app's database like any other import.",
+    )
     if uploaded is None or not st.button("Read file"):
         return
     st.session_state.pop("preview", None)
+    st.session_state.pop("smart", None)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "upload.bin"
         path.write_bytes(uploaded.getvalue())
@@ -72,12 +81,84 @@ def _read_upload(ctx: AppContext) -> None:
                     max_pdf_pages=s.max_pdf_pages,
                     use_ocr=use_ocr,
                     tesseract_cmd=s.tesseract_cmd,
+                    password=password or None,
                 )
         except NeedsOcrError as exc:
             st.warning(f"{exc} Tick the OCR box and read the file again.")
             return
+        except PasswordRequiredError as exc:
+            st.warning(str(exc))
+            return
+        except WrongPasswordError as exc:
+            st.error(str(exc))
+            return
     st.session_state["raw"] = raw
     st.session_state["file_name"] = uploaded.name
+
+
+def _smart_section(
+    ctx: AppContext, raw: RawTable, account_id: str
+) -> tuple[RawTable, ColumnMapping, ImportChoices] | None:
+    """Optional: let the local model work out the layout, then test it against the document."""
+    st.subheader("Optional: let the local AI read the layout")
+    st.caption(
+        "Rules try first (no AI needed). Only if they cannot read the layout is the local model "
+        "(on this computer) shown the column headings, a few sample rows and the text around the "
+        "table. Neither ever supplies amounts, and a reading is offered for use only if the "
+        "document's own balances and totals agree with it."
+    )
+    if st.button("Analyze the layout"):
+        account = AccountRepository(ctx.conn).get(account_id)
+        with st.spinner("Reading the layout (if the local AI is needed, the first run is slow)..."):
+            st.session_state["smart"] = understand(
+                ctx.llm(), raw, account_id=account_id, default_currency=account.currency
+            )
+    smart: Understanding | None = st.session_state.get("smart")
+    if smart is None:
+        return None
+    if smart.application is None or smart.check is None or smart.reading.layout is None:
+        st.warning(f"No usable reading was obtained: {smart.problem}. Use the manual steps.")
+        return None
+    how = "rules (no AI needed)" if smart.source == "rules" else "the local AI"
+    st.caption(f"Layout worked out by {how}.")
+    for repair in smart.repairs:
+        st.info(repair)
+    layout, application = smart.reading.layout, smart.application
+    st.write(
+        f"**Bank:** {safe_cell(layout.bank_name or 'not stated', 80)} | **Currency:** {layout.currency} | "
+        f"**Rows read:** {len(application.table.rows)}"
+    )
+    for note in application.notes:
+        st.info(note)
+    st.dataframe(
+        [
+            {"Check": c.name, "Result": "agrees" if c.ok else "DOES NOT AGREE", "Detail": c.detail}
+            for c in smart.check.items
+        ]
+    )
+    if application.opening_minor is not None and application.closing_minor is not None:
+        st.write(
+            f"Opening balance {application.opening_minor / 100:,.2f} -> closing balance "
+            f"{application.closing_minor / 100:,.2f} {layout.currency}"
+        )
+    account = AccountRepository(ctx.conn).get(account_id)
+    if layout.currency != account.currency:
+        st.warning(
+            f"The statement is in {layout.currency} but this account is in {account.currency}. "
+            f"Open 'Create an account' above, create one in {layout.currency}, select it under "
+            "'Import into', and analyze the layout again."
+        )
+        return None
+    if not smart.trustworthy:
+        st.warning(
+            "The document's numbers do NOT all agree with the AI's reading, or there was nothing "
+            "to check it against. Do not use it blindly: use the manual steps below."
+        )
+        return None
+    st.success("The document's own balances and totals agree with this reading.")
+    if st.checkbox("Use this reading (skip the manual column and format steps)"):
+        return application.table, application.mapping, application.choices
+    return None
 
 
 def _mapping_section(raw: RawTable) -> ColumnMapping | None:
@@ -104,7 +185,12 @@ def _mapping_section(raw: RawTable) -> ColumnMapping | None:
         )
         return None if choice == NONE else int(choice)
 
-    style = st.radio("Amounts are in", ["one amount column", "separate debit and credit columns"])
+    has_split = "debit" in suggestion.found or "credit" in suggestion.found
+    style = st.radio(
+        "Amounts are in",
+        ["one amount column", "separate debit and credit columns"],
+        index=1 if has_split and "amount" not in suggestion.found else 0,
+    )
     date_col, desc_col = pick("Date", "date"), pick("Description", "description")
     kwargs: dict[str, int | None] = {"date_col": date_col, "description_col": desc_col}
     if style == "one amount column":
@@ -133,7 +219,12 @@ def _choices_section(
     samples = [r.cells[mapping.date_col] for r in raw.rows[:30] if mapping.date_col < len(r.cells)]
     guess = detect_date_format(samples)
     formats = list(guess.candidates) or list(DATE_FORMATS)
-    if not guess.candidates:
+    if not guess.candidates and dates_have_no_year(samples):
+        st.warning(
+            "These dates have no year, so no date format below can read them. Use 'Analyze the "
+            "layout' above: it finds the year in the statement's own text."
+        )
+    elif not guess.candidates:
         st.warning("No single date format fits every row; pick the closest and check the preview.")
     elif guess.ambiguous:
         st.warning("These dates can be read in more than one way. Choose carefully.")
@@ -290,11 +381,15 @@ def main(ctx: AppContext) -> None:
     if raw is not None:
         for warning in raw.warnings:
             st.warning(warning)
-        mapping = _mapping_section(raw)
-        if mapping is not None:
-            choices = _choices_section(ctx, raw, mapping, account_id)
-            if choices is not None:
-                _preview_section(ctx, raw, mapping, choices)
+        smart = _smart_section(ctx, raw, account_id)
+        if smart is not None:
+            _preview_section(ctx, *smart)
+        else:
+            mapping = _mapping_section(raw)
+            if mapping is not None:
+                choices = _choices_section(ctx, raw, mapping, account_id)
+                if choices is not None:
+                    _preview_section(ctx, raw, mapping, choices)
     _categorize_section(ctx)
 
 

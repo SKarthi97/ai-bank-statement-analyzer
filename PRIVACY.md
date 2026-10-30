@@ -17,6 +17,7 @@ claim is checked and its limits, see [SECURITY.md](SECURITY.md).
 | Audit events | Same database | Event names, ids and counts only: never descriptions or amounts. |
 | Logs | `logs/` in your data folder | Scrubbed: amounts, long digit runs, IBANs, e-mail addresses and URL queries are removed, and exception messages are not written. Free text cannot be reliably recognised, so the rule is that nothing logs statement content. |
 | Passcode (if you set one) | `passcode.json` | Only a salted scrypt hash, never the passcode. |
+| A PDF's password, when you enter one | Memory only, for that import | Used once to open the file; passed to the parsing process on its private input, never on a command line, in a log, in the database or in a backup. The text of the statement, once read, is stored unencrypted like any other import. |
 | Backups you create | `backups/` in your data folder | Encrypted with your passphrase, which is never stored. |
 | Exports you download | Wherever your browser saves them | **Not encrypted.** CSV files are plain text. |
 | Uploaded files | A private temporary folder during import | Deleted when the import step ends, even on error. Your original file is never modified. |
@@ -35,7 +36,13 @@ Be aware of what is **outside** the app's control:
 - **The local AI (Ollama).** The app sends it only short cleaned descriptions and a money-in/money-out flag when
   categorizing (no amounts, dates, balances or account names). For the assistant it sends, only when its fixed phrase
   rules do not understand a question, your question text and your category names, and, to rephrase an answer, the
-  computed figures and up to 20 supporting rows (dates, cleaned descriptions, amounts). This goes to a model server **on your own computer**; the app refuses to use one that is not.
+  computed figures and up to 20 supporting rows (dates, cleaned descriptions, amounts).
+  **Layout analysis (Import Center → "Analyze the layout")** tries fixed rules first and asks the model only when the
+  rules cannot read the file. In that case it sends the column headings, up to 15 sample rows exactly as written
+  (**dates, descriptions, amounts and running balances**) and up to 1,500 characters of text from the top of the first
+  page and the bottom of the last page, in which runs of 9 or more digits (account numbers) are masked. **Your name
+  and address can appear in that text**, because free text cannot be reliably recognised. This goes to a model server
+  **on your own computer**; the app refuses to use one that is not.
   What Ollama itself does (downloads, updates, cloud features) depends on your version and settings. Configure it to
   stay local and check its documentation; this project cannot verify it.
 - **Your browser** shows the pages and may keep its own history or cache.

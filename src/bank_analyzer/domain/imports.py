@@ -46,6 +46,9 @@ class RawTable:
     headers: tuple[str, ...]
     rows: tuple[RawRow, ...]
     warnings: tuple[str, ...] = field(default=())
+    # Text around the table (statement header and footer), where a PDF has it. Used only to help
+    # a person or a local model understand the layout; never parsed as transactions.
+    context_text: str = ""
 
 
 class ColumnMapping(BaseModel):

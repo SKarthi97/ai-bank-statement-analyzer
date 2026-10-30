@@ -21,11 +21,13 @@ def extract_table(
     max_pdf_pages: int = 100,
     use_ocr: bool = False,
     tesseract_cmd: str | None = None,
+    password: str | None = None,
 ) -> RawTable:
     """Extract a validated, staged upload into a RawTable (CSV, XLSX and PDF supported).
 
     For PDFs, ``use_ocr`` selects the optional OCR path for scans. A scan without ``use_ocr``
-    raises NeedsOcrError so the caller can offer it.
+    raises NeedsOcrError so the caller can offer it. ``password`` opens an encrypted PDF; it is
+    used only for that and is never stored or logged.
     """
     if staged.kind == FileKind.CSV:
         return read_csv(
@@ -44,6 +46,9 @@ def extract_table(
                 sha256=staged.sha256,
                 tesseract_cmd=tesseract_cmd,
                 max_pages=max_pdf_pages,
+                password=password,
             )
-        return read_pdf(staged.path, sha256=staged.sha256, max_pages=max_pdf_pages)
+        return read_pdf(
+            staged.path, sha256=staged.sha256, max_pages=max_pdf_pages, password=password
+        )
     raise NotImplementedError(f"{staged.kind} import is not implemented")

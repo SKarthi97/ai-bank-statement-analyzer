@@ -75,12 +75,15 @@ class FakeStreamlit(types.ModuleType):
         *,
         clicks: Iterable[str] = (),
         upload: tuple[str, bytes] | None = None,
+        texts: dict[str, str] | None = None,
     ) -> None:
         super().__init__("streamlit")
         self.session_state: dict[str, Any] = {}
         self.sidebar = _Context(self)
         self.clicks = set(clicks)
         self.upload = upload
+        self.texts = texts or {}  # label -> what the user typed
+        self.messages: list[tuple[str, str]] = []  # (kind, text) of warning/error/info/success
         self.calls: list[str] = []
         self.clicked: list[str] = []
         self.shown: list[Any] = []  # data handed to dataframe/table widgets
@@ -94,6 +97,8 @@ class FakeStreamlit(types.ModuleType):
         def call(*args: Any, **kw: Any) -> Any:
             self.calls.append(name)
             label = args[0] if args and isinstance(args[0], str) else ""
+            if name in ("warning", "error", "info", "success"):
+                self.messages.append((name, label))
             if name == "columns":
                 n = args[0] if args else 1
                 return [_Context(self) for _ in range(len(n) if isinstance(n, list | tuple) else n)]
@@ -112,7 +117,7 @@ class FakeStreamlit(types.ModuleType):
                     return True
                 return False
             if name == "text_input":
-                return kw.get("value", "")
+                return self.texts.get(label, kw.get("value", ""))
             if name == "number_input":
                 return kw.get("value", 1)
             if name == "date_input":

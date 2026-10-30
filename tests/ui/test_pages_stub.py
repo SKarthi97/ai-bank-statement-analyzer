@@ -20,6 +20,7 @@ from bank_analyzer.domain.models import AccountType
 from bank_analyzer.security.logging_config import shutdown_logging
 from bank_analyzer.security.network_guard import guard_active, uninstall_guard
 from bank_analyzer.security.passcode import set_passcode
+from helpers import write_shaded_statement
 from stub_streamlit import FakeStreamlit, fake_pandas
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -252,3 +253,93 @@ class TestPhase8Pages:
         run("pages/4_Settings.py", monkeypatch, fake)
         assert "Check database integrity" in fake.clicked
         assert "success" in fake.calls
+
+
+class TestPasswordProtectedUpload:
+    LABEL = "PDF password (only if the PDF asks for one)"
+
+    def _locked_pdf(self, tmp_path: Path) -> bytes:
+        path = tmp_path / "locked.pdf"
+        write_shaded_statement(
+            path, ("DATE", "PARTICULARS", "PAYMENTS", "RECEIPTS", "BALANCE"), "pw-12345"
+        )
+        return path.read_bytes()
+
+    def _run(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch, data: bytes, typed: str
+    ) -> FakeStreamlit:
+        seed(env, history=False)
+        fake = FakeStreamlit(
+            clicks={"Read file"},
+            upload=("locked.pdf", data),
+            texts={self.LABEL: typed} if typed else None,
+        )
+        run("pages/0_Import_Center.py", monkeypatch, fake)
+        return fake
+
+    def test_a_locked_pdf_without_a_password_asks_for_one(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = self._run(env, monkeypatch, self._locked_pdf(tmp_path), "")
+        assert (
+            "warning",
+            "The PDF is password-protected. Enter its password and read the file again.",
+        ) in fake.messages
+        assert "raw" not in fake.session_state
+
+    def test_a_wrong_password_is_refused_without_echoing_it(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = self._run(env, monkeypatch, self._locked_pdf(tmp_path), "guess-wrong")
+        assert ("error", "That password does not open the PDF.") in fake.messages
+        assert all("guess-wrong" not in text for _, text in fake.messages)
+        assert "raw" not in fake.session_state
+
+    def test_the_right_password_reads_the_statement(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = self._run(env, monkeypatch, self._locked_pdf(tmp_path), "pw-12345")
+        raw = fake.session_state["raw"]
+        assert raw.headers == ("DATE", "PARTICULARS", "PAYMENTS", "RECEIPTS", "BALANCE")
+        assert len(raw.rows) == 5
+        assert "pw-12345" not in repr(fake.session_state)  # the password is never kept in state
+
+
+def test_manual_mapping_starts_on_debit_credit_when_the_file_has_those_columns(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(env, history=False)
+    fake = FakeStreamlit(
+        clicks={"Read file"},
+        upload=("s.pdf", (FIXTURES / "statement_debit_credit.pdf").read_bytes()),
+    )
+    run("pages/0_Import_Center.py", monkeypatch, fake)
+    assert "raw" in fake.session_state
+    assert not any("Choose either one amount column" in text for _, text in fake.messages)
+
+
+class TestYearlessAndCurrencyGuidance:
+    def _statement(self, tmp_path: Path) -> bytes:
+        path = tmp_path / "s.pdf"
+        write_shaded_statement(path, ("DATE", "PARTICULARS", "PAYMENTS", "RECEIPTS", "BALANCE"))
+        return path.read_bytes()
+
+    def test_manual_path_explains_dates_without_a_year(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=False)
+        fake = FakeStreamlit(clicks={"Read file"}, upload=("s.pdf", self._statement(tmp_path)))
+        run("pages/0_Import_Center.py", monkeypatch, fake)
+        assert any("no year" in text and "Analyze the layout" in text for _, text in fake.messages)
+        assert not any("No single date format fits" in text for _, text in fake.messages)
+
+    def test_a_currency_mismatch_says_how_to_fix_it(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(env, history=False)  # the seeded account is in USD
+        fake = FakeStreamlit(
+            clicks={"Read file", "Analyze the layout"},
+            upload=("s.pdf", self._statement(tmp_path)),
+        )
+        run("pages/0_Import_Center.py", monkeypatch, fake)
+        assert any("Open 'Create an account' above" in text for _, text in fake.messages)

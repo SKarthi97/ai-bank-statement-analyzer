@@ -206,6 +206,8 @@ python scripts/make_offline_bundle.py install-command <bundle folder>
 | Money in and out are swapped | Wrong sign setting (cards often list purchases as positive) | Change "Which amounts are money going out?". |
 | PDF yields no rows | A scan, or a layout with no ruled table | Tick the OCR box, or export CSV from your bank. The app never invents rows. |
 | "OCR unavailable" | Tesseract missing or not on PATH | Install it; set `BANKAN_TESSERACT_CMD`. |
+| "The PDF is password-protected" | The bank encrypted the PDF | Type its password in "PDF password" (Import Center) and click Read file again. It is used once and never saved. |
+| "That password does not open the PDF" | Wrong password | Check it; some banks use a date of birth or an ID number. If you cannot open it in a PDF viewer either, ask the bank. |
 | "Reading the file took too long" or "parser stopped unexpectedly" | File too large or damaged | Split or re-export it; limits are in the table above. |
 | Page will not start | The in-app guard, or Streamlit not installed | See Install step 4. |
 | "Port in use" | Another instance is running | Close it, or `python scripts/run_app.py --port 8502`. |

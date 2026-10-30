@@ -29,11 +29,11 @@ _VOCAB: dict[str, frozenset[str]] = {
     "amount": frozenset({"amount", "amt", "transaction amount", "betrag", "value"}),
     "debit": frozenset(
         {"debit", "debits", "withdrawal", "withdrawals", "money out", "paid out", "soll"}
-        | {"debit amount", "dr"}
+        | {"debit amount", "dr", "payment", "payments", "withdrawn", "paid"}
     ),
     "credit": frozenset(
         {"credit", "credits", "deposit", "deposits", "money in", "paid in", "haben"}
-        | {"credit amount", "cr"}
+        | {"credit amount", "cr", "receipt", "receipts", "received"}
     ),
     "balance": frozenset({"balance", "running balance", "closing balance", "saldo"}),
     "currency": frozenset({"currency", "ccy", "cur", "währung"}),
