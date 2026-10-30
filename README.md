@@ -99,6 +99,22 @@ the real protection either way).
 `BANKAN_TESSERACT_CMD`). On Windows the UB Mannheim build or `winget install` works; macOS `brew install
 tesseract`; Linux `apt install tesseract-ocr`. OCR output is flagged for review row by row; you must confirm amounts.
 
+**Alternative: Docker (for testing).** `Dockerfile` and `docker-compose.yml` give a Python 3.11 environment with real
+Streamlit and Tesseract, plus an Ollama container. Building needs the internet once; running does not.
+
+```
+docker compose --profile test run --rm test     # whole test suite, including pages under real Streamlit
+docker compose up -d                            # app on http://127.0.0.1:8501 (published to this computer only)
+docker compose exec ollama ollama pull llama3.2:3b
+docker compose exec app python scripts/check_model.py
+```
+
+Notes: inside the container the app listens on `0.0.0.0` (the container's own network) using the launcher's
+`--allow-non-loopback` flag; the port is published to the host's `127.0.0.1` only. The app shares Ollama's network, so
+the model is still "local" to it. Containers are **not** outbound-blocked by this setup; add a firewall rule if you
+need that. Your data lives in the `bank-data` Docker volume, not in the project folder. This setup has not been built
+or run yet.
+
 ## Using it
 
 1. **Import Center**: create an account (an alias such as "Main checking"; never a full account number), upload a

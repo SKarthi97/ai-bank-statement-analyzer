@@ -16,11 +16,12 @@ containment needs an OS sandbox or a separate low-privilege account.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,20 @@ def _close_job(job: Any) -> None:
 # -- running a child --------------------------------------------------------------------------
 
 
+def _posix_limit_function(memory_mb: int) -> Callable[[], None] | None:
+    """A function for ``preexec_fn`` that caps the child's address space, or None if unavailable."""
+    try:
+        resource = importlib.import_module("resource")
+    except ImportError:
+        return None
+    limit = memory_mb * 1024 * 1024
+
+    def apply() -> None:
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    return apply
+
+
 def run_limited(
     command: Sequence[str],
     stdin_bytes: bytes,
@@ -124,6 +139,7 @@ def run_limited(
     Raises ImportStructureError on timeout (the child is killed). stderr is discarded.
     """
     creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    posix_limit = _posix_limit_function(memory_mb) if os.name == "posix" else None
     process = subprocess.Popen(  # noqa: S603 - fixed interpreter and module, no shell
         list(command),
         stdin=subprocess.PIPE,
@@ -131,6 +147,7 @@ def run_limited(
         stderr=subprocess.DEVNULL,
         env=_child_env(),
         creationflags=creationflags,
+        preexec_fn=posix_limit,  # noqa: PLW1509 - only calls setrlimit in the child
     )
     job = None
     if os.name == "nt":
@@ -146,7 +163,7 @@ def run_limited(
         raise ImportStructureError("Reading the file took too long and was stopped.") from exc
     finally:
         _close_job(job)
-    applied = job is not None or os.name == "posix"
+    applied = job is not None or posix_limit is not None
     return process.returncode, stdout, applied
 
 

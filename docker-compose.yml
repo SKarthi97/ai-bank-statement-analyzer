@@ -1,0 +1,39 @@
+# Local test/run environment. See the Dockerfile header and README ("Docker").
+#
+# The app shares the ollama container's network (network_mode), so the model server is
+# 127.0.0.1:11434 from the app's point of view and the app's "local model only" rule holds.
+# Only port 8501 is published, and only on the host's loopback address.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "127.0.0.1:8501:8501"   # the app's UI (the app runs in this network namespace)
+    volumes:
+      - ollama-models:/root/.ollama
+
+  app:
+    build:
+      context: .
+      target: app
+    network_mode: "service:ollama"
+    depends_on:
+      - ollama
+    volumes:
+      - bank-data:/data
+    environment:
+      BANKAN_MODEL: llama3.2:3b
+
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      HYPOTHESIS_DATABASE_DIRECTORY: /tmp/hypothesis
+    # No network needed to run the tests.
+    network_mode: "none"
+
+volumes:
+  ollama-models:
+  bank-data:

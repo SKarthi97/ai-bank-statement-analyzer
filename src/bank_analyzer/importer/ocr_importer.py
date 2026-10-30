@@ -185,7 +185,9 @@ def run_tesseract(command: str, image: Path, *, timeout: int = DEFAULT_TIMEOUT_S
     """Run Tesseract on one image and return its TSV output. No shell is involved."""
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argument list, no shell
-            [command, str(image), "stdout", "--psm", "6", "tsv"],
+            # psm 4 (a column of variable-size text) read the ruled fixture fully; psm 6 returned only
+            # its title line under Tesseract 5 (found by the first real OCR run).
+            [command, str(image), "stdout", "--psm", "4", "tsv"],
             capture_output=True,
             timeout=timeout,
             check=False,
