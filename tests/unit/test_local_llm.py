@@ -138,7 +138,10 @@ class TestChat:
             time.sleep(1)
             return FakeOllama.wrap({"results": []})
 
-        with FakeOllama(chat=slow) as server, pytest.raises(LLMUnavailable):
+        with (
+            FakeOllama(chat=slow) as server,
+            pytest.raises(LLMUnavailable, match="did not answer in time"),
+        ):
             client(server, timeout_s=0.3).chat_json("s", "u", SCHEMA)
 
 

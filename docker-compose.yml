@@ -23,6 +23,8 @@ services:
       - bank-data:/data
     environment:
       BANKAN_MODEL: llama3.2:3b
+      # The first request loads the model, which took over 60 s on a CPU-only container.
+      BANKAN_LLM_TIMEOUT_S: "300"
 
   test:
     profiles: ["test"]

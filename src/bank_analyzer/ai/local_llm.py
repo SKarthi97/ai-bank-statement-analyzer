@@ -104,6 +104,12 @@ class OllamaClient:
                 raise LLMResponseError("The local server tried to redirect the request.") from exc
             raise LLMResponseError(f"The local server returned HTTP {exc.code}.") from exc
         except (urllib.error.URLError, OSError) as exc:  # refused, unreachable, timed out
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            if isinstance(reason, TimeoutError):
+                raise LLMUnavailable(
+                    "The local model did not answer in time. The first request loads the model "
+                    "and can be slow on a CPU; try again or raise BANKAN_LLM_TIMEOUT_S."
+                ) from exc
             raise LLMUnavailable("The local model server could not be reached.") from exc
         if len(body) > self._max_bytes:
             raise LLMResponseError("The model response was larger than the allowed limit.")
